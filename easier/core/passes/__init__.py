@@ -13,3 +13,4 @@ from .dataflow_fusion import fuse_dataflow
 # from .codegen_simulation import simulate_codegen
 # from .code_generation import generate_code
 # from .layout_alignment import align_layout
+from .codegen import code_generation

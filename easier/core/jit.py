@@ -413,6 +413,7 @@ def compile(
     for m, g in zip(modules, graphs):
         jit_engine = JitEngine(m, g)
         m.forward = jit_engine.forward
+        m.jit_engine = jit_engine
 
     esr.logger.info("EASIER just-in-time compilation has completed")
 

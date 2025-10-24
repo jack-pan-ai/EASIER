@@ -251,12 +251,12 @@ class ShallowWaterInitializer(esr.Module):
         self.bsy[:] = -bnorm_y
 
 
-def assemble_shallow_water(mesh: str, shallow_water: str, device='cpu'):
+def assemble_shallow_water(mesh: str, shallow_water: str, device='cpu', backend='torch'):
     components = ShallowWaterMeshComponentsCollector(mesh)
     components.to(device)
 
     [components] = esr.compile(
-        [components], 'torch', partition_mode='evenly'
+        [components], backend, partition_mode='evenly'
     )  # type: ignore
     components: ShallowWaterMeshComponentsCollector
     components()
@@ -272,7 +272,7 @@ def assemble_shallow_water(mesh: str, shallow_water: str, device='cpu'):
     initializer.to(device)
 
     [initializer] = esr.compile(
-        [initializer], 'torch', partition_mode='evenly'
+        [initializer], backend, partition_mode='evenly'
     )  # type: ignore
     initializer: ShallowWaterInitializer
     initializer()
@@ -306,6 +306,10 @@ if __name__ == '__main__':
         "--comm_backend", type=str, choices=["gloo", "nccl"],
         default='gloo'
     )
+    parser.add_argument(
+        "--backend", type=str, choices=["none", "torch", "cpu", "cuda"],
+        default='torch'
+    )
     parser.add_argument("mesh", type=str)
     parser.add_argument("shallow_water", type=str)
     args = parser.parse_args()
@@ -316,4 +320,4 @@ if __name__ == '__main__':
 
     esr.init(args.comm_backend)
 
-    assemble_shallow_water(args.mesh, args.shallow_water, args.device)
+    assemble_shallow_water(args.mesh, args.shallow_water, args.device, args.backend)

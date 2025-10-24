@@ -7,6 +7,7 @@
 *.pth
 *.msh
 *.mtx
+*.gif
 !tutorial/*.png
 !tutorial/shallow_water_equation/*.png
 !docs/images/*.png
@@ -22,6 +23,7 @@ easier/core/passes/codegen/support/cpu/*/*.h
 __pycache__/
 *.py[cod]
 *$py.class
+res/
 
 # C extensions
 *.so
