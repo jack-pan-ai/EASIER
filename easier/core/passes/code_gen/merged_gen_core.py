@@ -3,15 +3,16 @@
 
 import string
 import numpy as np
-from easier.core.codegen.utils import get_dim_length
+from easier.core.passes.code_gen.utils import get_dim_length
+from easier.core.utils import logger
 
 # debug print
 def debug_print(code, code_name):
     if code != []:
         for op in code:
-            print(f"{code_name}: {op}")
+            logger.debug(f"{code_name}: {op}")
     else:
-        print(f"{code_name} is empty")
+        logger.debug(f"{code_name} is empty")
 
 
 def declarations_gen(
@@ -54,7 +55,7 @@ def declarations_gen(
             if str(inp['dtype_data']) == 'torch.int32' and inp['shape_ahead'] == 1:
                 # this is very speicial case in the GMRES solver
                 input_parameters_code.append(
-                    f"  int {name}, \n")
+                    f"  int {name}_const, \n")
             else:
                 # spm and vector x
                 input_parameters_code.append(

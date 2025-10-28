@@ -9,6 +9,7 @@ from easier.core.module import Reducer, Selector
 from easier.core.runtime.metadata import Role
 from easier.core.passes.dataflow_fusion.node_group import \
     NodeGroup, get_node_group
+from easier.core.utils import logger
 
 def get_node_info(node, node_meta_dict, node_placeholder_meta_dict):
     '''
@@ -66,11 +67,11 @@ def trace_graph(submodule, traced_model):
     # the placeholder nodes here will contain the reducer nodes (which is not used)
     node_placeholder_meta_dict = {node.name: node \
         for node in traced_model.nodes}
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        print("selector_set: ", selector_set)
-        print("selector_tensor_set: ", selector_tensor_set)
-        print("node_placeholder_meta_dict: ", node_placeholder_meta_dict)
-        print("node_meta_dict: ", node_meta_dict)
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    logger.debug(f"selector_set: {selector_set}")
+    logger.debug(f"selector_tensor_set: {selector_tensor_set}")
+    logger.debug(f"node_placeholder_meta_dict: {node_placeholder_meta_dict}")
+    logger.debug(f"node_meta_dict: {node_meta_dict}")
     
     # for node in node_group.nodes:
     #     print(node.op)
@@ -129,8 +130,8 @@ def trace_graph(submodule, traced_model):
                     }
                 )
     # debug print
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        print("output_nodes: ", output_nodes)
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    logger.debug(f"output_nodes: {output_nodes}")
     # exclude the output node
     traced_nodes = traced_nodes[:len(traced_nodes) - 1]
 
@@ -176,11 +177,11 @@ def trace_graph(submodule, traced_model):
                 }
             )
     # debug print
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        for inp in inputs:
-            print(f"Input: {inp}")
-        for out in outputs:
-            print(f"Output: {out}")
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    for inp in inputs:
+        logger.debug(f"Input: {inp}")
+    for out in outputs:
+        logger.debug(f"Output: {out}")
     #  -------------------------------------------------------------
     #  obtain the selector in intermediate register, 
     #     including the vector x and edge tensor.
@@ -233,9 +234,9 @@ def trace_graph(submodule, traced_model):
                     }
                 )                
     # debug print
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        for inter in selector_register:
-            print(f"Selector register: {inter}")
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    for inter in selector_register:
+        logger.debug(f"Selector register: {inter}")
 
     #  -------------------------------------------------------------
     #  obtain the map operations
@@ -319,9 +320,9 @@ def trace_graph(submodule, traced_model):
                 'args': [arg.name if hasattr(arg, 'name') else arg for arg in args]
             })
     # debug print
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        for op in map_operations:
-            print(f"Map operation: {op}")
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    for op in map_operations:
+        logger.debug(f"Map operation: {op}")
     
     #  -------------------------------------------------------------
     #  obtain the reducer and aggregator operations
@@ -359,11 +360,11 @@ def trace_graph(submodule, traced_model):
             })
             
     # debug print
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        for op in reducer_operations:
-            print(f"Reducer operation: {op}")
-        for op in aggregator_operations:
-            print(f"Aggregator operation: {op}")
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    for op in reducer_operations:
+        logger.debug(f"Reducer operation: {op}")
+    for op in aggregator_operations:
+        logger.debug(f"Aggregator operation: {op}")
 
     return inputs, outputs, selector_register, map_operations, \
         reducer_operations, aggregator_operations

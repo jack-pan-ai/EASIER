@@ -5,9 +5,10 @@ import os
 import string
 import numpy as np
 
-from easier.core.codegen.utils import get_dim_length
-from easier.core.codegen.merged_gen_binding import generate_binding_code
-from easier.core.codegen.trace.graph_trace import trace_graph
+from easier.core.passes.code_gen.utils import get_dim_length
+from easier.core.passes.code_gen.merged_gen_binding import generate_binding_code
+from easier.core.passes.code_gen.trace.graph_trace import trace_graph
+from easier.core.utils import logger
 
 
 def generate_cuda_code_from_graph(submodule, traced_model):
@@ -145,21 +146,21 @@ def generate_cuda_code_from_graph(submodule, traced_model):
             output_agent_forloop_code.append(f"  }} \n")
 
     # debug print
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        for inp in input_declarations_utils_code:
-            print(f"Input declarations utils: {inp}")
-        for inp in input_declarations_code:
-            print(f"Input declarations: {inp}")
-        for inp in input_init_code:
-            print(f"Input init code: {inp}")
-        for inp in input_agent_tenosrs_code:
-            print(f"Input agent tenosrs code: {inp}")
-        for out in output_agent_tenosrs_code:
-            print(f"Output agent tenosrs code: {out}")
-        for out in output_agent_SMEM_code:
-            print(f"Output agent SMEM code: {out}")
-        for out in output_agent_forloop_code:
-            print(f"Output agent forloop code: {out}")
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    for inp in input_declarations_utils_code:
+        logger.debug(f"Input declarations utils: {inp}")
+    for inp in input_declarations_code:
+        logger.debug(f"Input declarations: {inp}")
+    for inp in input_init_code:
+        logger.debug(f"Input init code: {inp}")
+    for inp in input_agent_tenosrs_code:
+        logger.debug(f"Input agent tenosrs code: {inp}")
+    for out in output_agent_tenosrs_code:
+        logger.debug(f"Output agent tenosrs code: {out}")
+    for out in output_agent_SMEM_code:
+        logger.debug(f"Output agent SMEM code: {out}")
+    for out in output_agent_forloop_code:
+        logger.debug(f"Output agent forloop code: {out}")
 
     # Generate the selector register code
     selector_code = []
@@ -188,9 +189,9 @@ def generate_cuda_code_from_graph(submodule, traced_model):
                 f"    TensorInput_{_target}_T {_selector_name}({_target}_ptr_current); \n")
 
     # debug print
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        for inter in selector_code:
-            print(f"Selector code: {inter}")
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    for inter in selector_code:
+        logger.debug(f"Selector code: {inter}")
 
     # Generate the CUDA kernel code (map operations)
     map_code = []
@@ -330,11 +331,11 @@ def generate_cuda_code_from_graph(submodule, traced_model):
             raise ValueError(f"Operation {_op} not supported")
 
     # # Debug print to check kernel operations
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        for op in map_code:
-            print("Map code: ", op)
-        for op in map_agent_tenosrs_code:
-            print("Map agent tenosrs code: ", op)
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    for op in map_code:
+        logger.debug(f"Map code: {op}")
+    for op in map_agent_tenosrs_code:
+        logger.debug(f"Map agent tenosrs code: {op}")
 
     # Generate the aggregator code
     aggregator_code = []
@@ -364,11 +365,11 @@ def generate_cuda_code_from_graph(submodule, traced_model):
             aggregator_code.append(f"   }} \n")
 
     # debug print
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        for op in aggregator_reg_definitions:
-            print(f"Aggregator reg definitions: {op}")
-        for op in aggregator_code:
-            print(f"Aggregator code: {op}")
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    for op in aggregator_reg_definitions:
+        logger.debug(f"Aggregator reg definitions: {op}")
+    for op in aggregator_code:
+        logger.debug(f"Aggregator code: {op}")
 
     # Generate the reducer code
     reducer_code = []
@@ -413,9 +414,9 @@ def generate_cuda_code_from_graph(submodule, traced_model):
         reducer_code.append(f"   CTA_SYNC(); \n")
 
     # # debug print
-    if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
-        for op in reducer_code:
-            print(f"Reducer code: {op}")
+    # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
+    for op in reducer_code:
+        logger.debug(f"Reducer code: {op}")
 
     # Create directories for generated code if they don't exist
     project_root = os.path.abspath(os.path.dirname(__file__))
@@ -491,7 +492,7 @@ def generate_cuda_code_from_graph(submodule, traced_model):
     with open(os.path.join(include_dir, "merged_utils.cuh"), "w") as f:
         f.write(utils_code)
 
-    print("CUDA code generated successfully!")
+    logger.info("CUDA code generated successfully!")
 
     # Delegate binding and wrapper generation to dedicated modules
     generate_binding_code(project_root, inputs, outputs, selector_register)

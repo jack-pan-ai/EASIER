@@ -12,25 +12,25 @@ namespace {
 
 template <typename ValueT, typename OffsetT>
 void merged_spmv_launch_typed(
-    torch::Tensor v,
-    torch::Tensor clone_1,
-    torch::Tensor x,
+    torch::Tensor truediv,
+    torch::Tensor p,
+    torch::Tensor r,
     torch::Tensor row_end_offsets,
     int64_t num_rows,
     int64_t num_cols
 ) {
-  TORCH_CHECK(v.is_cuda(), "v must be a CUDA tensor");
-  TORCH_CHECK(v.is_contiguous(), "v must be contiguous");
-  TORCH_CHECK(clone_1.is_cuda(), "clone_1 must be a CUDA tensor");
-  TORCH_CHECK(clone_1.is_contiguous(), "clone_1 must be contiguous");
-  TORCH_CHECK(x.is_cuda(), "x must be a CUDA tensor");
-  TORCH_CHECK(x.is_contiguous(), "x must be contiguous");
+  TORCH_CHECK(truediv.is_cuda(), "truediv must be a CUDA tensor");
+  TORCH_CHECK(truediv.is_contiguous(), "truediv must be contiguous");
+  TORCH_CHECK(p.is_cuda(), "p must be a CUDA tensor");
+  TORCH_CHECK(p.is_contiguous(), "p must be contiguous");
+  TORCH_CHECK(r.is_cuda(), "r must be a CUDA tensor");
+  TORCH_CHECK(r.is_contiguous(), "r must be contiguous");
   TORCH_CHECK(row_end_offsets.is_cuda(), "row_end_offsets must be a CUDA tensor");
   TORCH_CHECK(row_end_offsets.is_contiguous(), "row_end_offsets must be contiguous");
 
-  TORCH_CHECK(v.scalar_type() ==             c10::CppTypeToScalarType<ValueT>::value, "v dtype mismatch");
-  TORCH_CHECK(clone_1.scalar_type() ==             c10::CppTypeToScalarType<ValueT>::value, "clone_1 dtype mismatch");
-  TORCH_CHECK(x.scalar_type() ==             c10::CppTypeToScalarType<ValueT>::value, "x dtype mismatch");
+  TORCH_CHECK(truediv.scalar_type() ==             c10::CppTypeToScalarType<ValueT>::value, "truediv dtype mismatch");
+  TORCH_CHECK(p.scalar_type() ==             c10::CppTypeToScalarType<ValueT>::value, "p dtype mismatch");
+  TORCH_CHECK(r.scalar_type() ==             c10::CppTypeToScalarType<ValueT>::value, "r dtype mismatch");
   TORCH_CHECK(row_end_offsets.scalar_type() ==             c10::CppTypeToScalarType<OffsetT>::value, "row_end_offsets dtype mismatch");
 
 
@@ -39,13 +39,13 @@ void merged_spmv_launch_typed(
   // TORCH_CHECK(row_end_offsets.numel() == num_rows + 1, "row_end_offsets must have length num_rows + 1");
 
 
-  auto options_val = torch::TensorOptions().dtype(v.scalar_type()).device(v.device());
+  auto options_val = torch::TensorOptions().dtype(truediv.scalar_type()).device(truediv.device());
 
 
   FlexParams<ValueT, OffsetT> params;
-  params.v_ptr =         reinterpret_cast<ValueT*>(v.data_ptr());
-  params.clone_1_ptr =         reinterpret_cast<ValueT*>(clone_1.data_ptr());
-  params.x_ptr =         reinterpret_cast<ValueT*>(x.data_ptr());
+  params.truediv_ptr =         reinterpret_cast<ValueT*>(truediv.data_ptr());
+  params.p_ptr =         reinterpret_cast<ValueT*>(p.data_ptr());
+  params.r_ptr =         reinterpret_cast<ValueT*>(r.data_ptr());
 
 
 
@@ -76,22 +76,22 @@ void merged_spmv_launch_typed(
 }
 
 void merged_spmv_launch_bind(
-    torch::Tensor v,
-    torch::Tensor clone_1,
-    torch::Tensor x,
+    torch::Tensor truediv,
+    torch::Tensor p,
+    torch::Tensor r,
     torch::Tensor row_end_offsets,
     int64_t num_rows,
     int64_t num_cols
 ) {
-  TORCH_CHECK(v.device().is_cuda(), "CUDA device required");
-  switch (v.scalar_type()) {
+  TORCH_CHECK(truediv.device().is_cuda(), "CUDA device required");
+  switch (truediv.scalar_type()) {
     case torch::kFloat:
-      return merged_spmv_launch_typed<float, int>(v, clone_1, x, row_end_offsets, num_rows, num_cols);
+      return merged_spmv_launch_typed<float, int>(truediv, p, r, row_end_offsets, num_rows, num_cols);
     case torch::kDouble:
-      return merged_spmv_launch_typed<double, int>(v, clone_1, x, row_end_offsets, num_rows, num_cols);
+      return merged_spmv_launch_typed<double, int>(truediv, p, r, row_end_offsets, num_rows, num_cols);
         
     default:
-      std::cerr << "Unsupported dtype for ValueT. dtype code: " << static_cast<int>(v.scalar_type()) << std::endl;
+      std::cerr << "Unsupported dtype for ValueT. dtype code: " << static_cast<int>(truediv.scalar_type()) << std::endl;
       // TORCH_CHECK(false, "Unsupported dtype for ValueT. Use float32 or float64.");
   }
 }
@@ -103,9 +103,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       "merged_spmv_launch",
       &merged_spmv_launch_bind,
       "Run merged SpMV kernel"
-      , py::arg("v")
-      , py::arg("clone_1")
-      , py::arg("x")
+      , py::arg("truediv")
+      , py::arg("p")
+      , py::arg("r")
       , py::arg("row_end_offsets")
       , py::arg("num_rows")
       , py::arg("num_cols")

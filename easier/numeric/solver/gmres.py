@@ -73,13 +73,13 @@ class SumW(esr.Module):
         self.V = V
         self.w = w
         self.h = h
-        self.ii = esr.Tensor(
+        self.i = esr.Tensor(
             torch.tensor([0], dtype=torch.int32, device=V.device),
             mode='replicate')
 
     def forward(self):
         self.h[:] = esr.sum(
-            self.V[:, ..., self.ii].squeeze(-1).clone() * self.w
+            self.V[:, ..., self.i].squeeze(-1).clone() * self.w
         ).sum()
 
 
@@ -101,13 +101,13 @@ class UpdateW(esr.Module):
         self.V = V
         self.w = w
         self.h = h
-        self.ii = esr.Tensor(
+        self.i = esr.Tensor(
             torch.tensor([0], dtype=torch.int32, device=V.device),
             mode='replicate')
 
     def forward(self):
         self.w.sub_(
-            self.h * self.V[:, ..., self.ii].squeeze(-1).clone()
+            self.h * self.V[:, ..., self.i].squeeze(-1).clone()
         )
 
 
@@ -118,12 +118,12 @@ class UpdateV(esr.Module):
         self.V = V
         self.w = w
         self.h = h
-        self.ii = esr.Tensor(
+        self.i = esr.Tensor(
             torch.tensor([0], dtype=torch.int32, device=V.device),
             mode='replicate')
 
     def forward(self):
-        self.V[:, ..., self.ii] = (self.w / self.h)[:, ..., None].clone()
+        self.V[:, ..., self.i] = (self.w / self.h)[:, ..., None].clone()
 
 
 class UpdateX(esr.Module):
@@ -134,11 +134,11 @@ class UpdateX(esr.Module):
         self.V = V
         self.M = M
         self.y = y
-        self.ii = i
+        self.i = i
 
     def forward(self):
-        V = self.V[:, ..., :self.ii].clone()
-        dx = torch.matmul(V, self.y[:self.ii].clone()).squeeze(dim=-1).clone()
+        V = self.V[:, ..., :self.i].clone()
+        dx = torch.matmul(V, self.y[:self.i].clone()).squeeze(dim=-1).clone()
         self.x.add_(self.M(dx))
 
 
@@ -200,21 +200,21 @@ class GMRES(esr.Module):
              for i in range(1, restart + 1)])
 
     def _init_w(self, j: int):
-        # All these `.ii, .j` esr.Tensors have ndim==0,
+        # All these `.i, .j` esr.Tensors have ndim==0,
         # we need to use `fill_()` to set the single element of them.
         self.init_w.j.fill_(j)
         self.init_w()
 
     def _sum_w(self, i: int):
-        self.sum_w.ii.fill_(i)
+        self.sum_w.i.fill_(i)
         self.sum_w()
 
     def _update_w(self, i: int):
-        self.update_w.ii.fill_(i)
+        self.update_w.i.fill_(i)
         self.update_w()
 
     def _update_V(self, i: int):
-        self.update_V.ii.fill_(i)
+        self.update_V.i.fill_(i)
         self.update_V()
 
     def solve(self,

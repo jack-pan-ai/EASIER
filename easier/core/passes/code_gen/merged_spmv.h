@@ -96,21 +96,18 @@ template <typename ValueT, typename OffsetT>
 void OmpMergeSystem(
     int num_threads,
     // [code generation]
-      ValueT *__restrict v_ptr, 
-  ValueT *__restrict clone_1_ptr, 
-  ValueT *__restrict x_ptr, 
+      ValueT *__restrict truediv_ptr, 
+  ValueT *__restrict p_ptr, 
+  ValueT *__restrict r_ptr, 
  int num_rows, int num_nonzeros) {
   // [code generation]
   // input and output tensors types
-    typedef Tensor<ValueT, 20> TensorInput_v_T; 
-  typedef Tensor<ValueT, 1> TensorInput_clone_1_T; 
-  typedef Tensor<ValueT, 1> TensorInput_x_T; 
-   typedef Tensor<ValueT, 20> TensorOutput_getitem_T; 
-  typedef Tensor<ValueT, 20> TensorOutput_clone_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_matmul_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_squeeze_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_clone_2_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_add__T; 
+    typedef Tensor<ValueT, 1> TensorInput_truediv_T; 
+  typedef Tensor<ValueT, 1> TensorInput_p_T; 
+  typedef Tensor<ValueT, 1> TensorInput_r_T; 
+   typedef Tensor<ValueT, 1> TensorOutput_mul_1_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_add_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_setitem_1_T; 
   
 
 #pragma omp parallel for schedule(static) num_threads(num_threads)
@@ -134,21 +131,21 @@ void OmpMergeSystem(
     
     for (; thread_coord.y < thread_coord_end.y; ++thread_coord.y) {
       // selector
-        TensorInput_v_T v(v_ptr +                     thread_coord.y * 20); 
-  TensorInput_clone_1_T clone_1(clone_1_ptr +                     thread_coord.y * 1); 
-  TensorInput_x_T x(x_ptr +                     thread_coord.y * 1); 
+        TensorInput_truediv_T truediv(truediv_ptr +                     thread_coord.y * 1); 
+  TensorInput_p_T p(p_ptr +                     thread_coord.y * 1); 
+  TensorInput_r_T r(r_ptr +                     thread_coord.y * 1); 
 
 
       // mapping
-          TensorOutput_getitem_T getitem(v); 
-    TensorOutput_clone_T clone(getitem); 
-    TensorOutput_matmul_T matmul =                     clone * clone_1; 
-    TensorOutput_squeeze_T squeeze(matmul); 
-    TensorOutput_clone_2_T clone_2(squeeze); 
-    x = x +                     clone_2; 
+          TensorOutput_mul_1_T mul_1 =                     truediv * p; 
+    TensorOutput_add_T add =                     r + mul_1; 
   for (int i = 0; i < 1; i++) 
   { 
-    x_ptr[thread_coord.y * 1 + i] = x.values[i]; 
+    p_ptr[thread_coord.y * 1 + i] = add.values[i]; 
+  } 
+  for (int i = 0; i < 1; i++) 
+  { 
+    p.values[i] = add.values[i];
   } 
 
 

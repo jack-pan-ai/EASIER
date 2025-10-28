@@ -124,19 +124,16 @@ namespace merged
         };
 
         // Tensor and TensorKey for input vector x
-          typedef Tensor<ValueT, 20> TensorInput_v_T; 
-  typedef Tensor<ValueT, 1> TensorInput_clone_1_T; 
-  typedef Tensor<ValueT, 1> TensorInput_x_T; 
+          typedef Tensor<ValueT, 1> TensorInput_truediv_T; 
+  typedef Tensor<ValueT, 1> TensorInput_p_T; 
+  typedef Tensor<ValueT, 1> TensorInput_r_T; 
 
 
         // Tensor and TensorKey for reducers 
         
-          typedef Tensor<ValueT, 20> TensorOutput_getitem_T; 
-  typedef Tensor<ValueT, 20> TensorOutput_clone_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_matmul_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_squeeze_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_clone_2_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_add__T; 
+          typedef Tensor<ValueT, 1> TensorOutput_mul_1_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_add_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_setitem_1_T; 
 
 
         /// Shared memory type required by this thread block
@@ -163,9 +160,9 @@ namespace merged
         RowOffsetsIteratorT wd_row_end_offsets;
 
         // [code generation] wrapper pointers for loading the data
-          VectorValueIteratorT v_ptr; 
-  VectorValueIteratorT clone_1_ptr; 
-  VectorValueIteratorT x_ptr; 
+          VectorValueIteratorT truediv_ptr; 
+  VectorValueIteratorT p_ptr; 
+  VectorValueIteratorT r_ptr; 
 
 
         //---------------------------------------------------------------------
@@ -181,9 +178,9 @@ namespace merged
             FlexParams<ValueT, OffsetT> &spmv_params) ///< SpMV input parameter bundle
             : temp_storage(temp_storage.Alias()),
                 wd_row_end_offsets(spmv_params.d_row_end_offsets),
-                  v_ptr(spmv_params.v_ptr), 
-    clone_1_ptr(spmv_params.clone_1_ptr), 
-    x_ptr(spmv_params.x_ptr), 
+                  truediv_ptr(spmv_params.truediv_ptr), 
+    p_ptr(spmv_params.p_ptr), 
+    r_ptr(spmv_params.r_ptr), 
 
               spmv_params(spmv_params)
         {
@@ -384,25 +381,26 @@ namespace merged
                 if (nonzero_idx < tile_num_nonzeros)
                 {
                     // [code generation]
-                        VectorValueIteratorT v_ptr_current = v_ptr +                     (tile_start_coord.y + nonzero_idx) * 20; 
-    TensorInput_v_T v(v_ptr_current); 
-    VectorValueIteratorT clone_1_ptr_current = clone_1_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_clone_1_T clone_1(clone_1_ptr_current); 
-    VectorValueIteratorT x_ptr_current = x_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_x_T x(x_ptr_current); 
+                        VectorValueIteratorT truediv_ptr_current = truediv_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
+    TensorInput_truediv_T truediv(truediv_ptr_current); 
+    VectorValueIteratorT p_ptr_current = p_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
+    TensorInput_p_T p(p_ptr_current); 
+    VectorValueIteratorT r_ptr_current = r_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
+    TensorInput_r_T r(r_ptr_current); 
 
 
                     // map
-                        TensorOutput_getitem_T getitem(v); 
-    TensorOutput_clone_T clone(getitem); 
-    TensorOutput_matmul_T matmul = clone *                     clone_1; 
-    TensorOutput_squeeze_T squeeze(matmul); 
-    TensorOutput_clone_2_T clone_2(squeeze); 
-x = x +                     clone_2; 
+                        TensorOutput_mul_1_T mul_1 = truediv *                     p; 
+    TensorOutput_add_T add = r +                     mul_1; 
   #pragma unroll 
   for (int i = 0; i < 1; i++) 
   { 
-    spmv_params.x_ptr[                (tile_start_coord.y + nonzero_idx) * 1 + i] =                     x.values[i]; 
+    spmv_params.p_ptr[                (tile_start_coord.y + nonzero_idx) * 1 + i] =                     add.values[i]; 
+  } 
+  #pragma unroll 
+  for (int i = 0; i < 1; i++) 
+  { 
+    p.values[i] = add.values[i];
   } 
 
 

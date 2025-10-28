@@ -249,9 +249,9 @@ template <
 struct FlexParams
 {
     // [code generation]
-      ValueT *v_ptr; 
-  ValueT *clone_1_ptr; 
-  ValueT *x_ptr; 
+      ValueT *truediv_ptr; 
+  ValueT *p_ptr; 
+  ValueT *r_ptr; 
 
     int num_rows;                ///< Number of rows of matrix <b>A</b>.
     int num_cols;                ///< Number of columns of matrix <b>A</b>.

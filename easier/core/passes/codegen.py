@@ -18,9 +18,10 @@ from torch.fx.node import Node
 from easier.core.runtime.modules import HaloExchanger
 from easier.core.passes.utils import get_called_module, FX
 # from easier.core.runtime.metadata import is_node_skipped
-from easier.core.codegen.python_wrapper.dynamic_replace_submodule import dynamic_replace_submodule
-from easier.core.codegen.merged_gen_gpu import generate_cuda_code_from_graph
-from easier.core.codegen.merged_gen_cpu import generate_cpu_code_from_graph
+from easier.core.passes.code_gen.python_wrapper.dynamic_replace_submodule import dynamic_replace_submodule
+from easier.core.passes.code_gen.merged_gen_gpu import generate_cuda_code_from_graph
+from easier.core.passes.code_gen.merged_gen_cpu import generate_cpu_code_from_graph
+from easier.core.utils import logger
 
 def _is_node_halo_exchanger(root: esr.Module, node: Node) -> bool:
     if node.op == FX.CALL_MODULE:
@@ -31,8 +32,8 @@ def _is_node_halo_exchanger(root: esr.Module, node: Node) -> bool:
 
 def _repo_root() -> str:
     # this file: EASIER/easier/core/passes/codegen.py -> easier/core/passes
-    # project root for generated files/templates: EASIER/easier/core/codegen
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "codegen"))
+    # project root for generated files/templates: EASIER/easier/core/passes/code_gen
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "passes", "code_gen"))
 
 
 def _hash_directory_tree(root_dir: str) -> str:
@@ -129,7 +130,7 @@ def _nvcc_threads_flag() -> str:
 
 
 def _build_cuda_extension_from_src(name: str, src_path: str, snapshot_include_dir: str, hash_key: str):
-    print(f"Building CUDA extension from snapshot: {src_path}")
+    logger.info(f"Building CUDA extension from snapshot: {src_path}")
     if torch.cuda.is_available():
         major, minor = torch.cuda.get_device_capability()
         os.environ.setdefault("TORCH_CUDA_ARCH_LIST", f"{major}.{minor}")
@@ -167,7 +168,7 @@ def _build_cuda_extension_from_src(name: str, src_path: str, snapshot_include_di
 
 
 def _build_cpu_extension_from_src(name: str, src_path: str, snapshot_include_dir: str, hash_key: str):
-    print(f"Building CPU extension from snapshot: {src_path}")
+    logger.info(f"Building CPU extension from snapshot: {src_path}")
     if shutil.which("sccache"):
         os.environ.setdefault("CMAKE_C_COMPILER_LAUNCHER", "sccache")
         os.environ.setdefault("CMAKE_CXX_COMPILER_LAUNCHER", "sccache")
@@ -214,20 +215,20 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
     # Collect build jobs across modules first (generation + snapshot)
     build_jobs: List[Tuple[str, str, str, str, object]] = []
     
-    print(f"================================================")
+    logger.info("================================================")
     for m, g in zip(ms, gs):
         backend = getattr(m, 'easier_jit_backend', 'torch')
-        print(f"Generating code for {backend} backend")
+        logger.info(f"Generating code for {backend} backend")
         if backend not in ['cuda', 'cpu']:
-            print(f"Skipping module with backend {backend}")
+            logger.info(f"Skipping module with backend {backend}")
             continue
 
         callmods = _collect_fused_call_modules(m, g)
 
         # Generate per submodule and snapshot immediately to avoid file clobbering
         for node_name, node, submod in callmods:
-            print(f"Node: {node_name}")
-            submod.graph.print_tabular()
+            logger.info(f"Node: {node_name}")
+            # submod.graph.print_tabular()
             if backend == 'cuda':
                 # Serialize only the codegen + snapshot to avoid shared-file contention
                 with _codegen_lock():
@@ -245,8 +246,8 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
             build_jobs.append((backend, node_name, snap_src, snap_inc, combined_hash))
 
     # Build in parallel per job
-    print(f"================================================")
-    print(f"Building extensions in parallel")
+    logger.info("================================================")
+    logger.info("Building extensions in parallel")
     built_extensions: Dict[str, object] = {}
     if build_jobs:
         n_workers = min(len(build_jobs), max(1, (os.cpu_count() or 2) // 2))
@@ -266,8 +267,8 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
                 built_extensions[node_name] = fut.result()
 
     # Replace submodules sequentially to preserve semantics
-    print(f"================================================")
-    print(f"Replacing submodules sequentially to preserve semantics")
+    logger.info("================================================")
+    logger.info("Replacing submodules sequentially to preserve semantics")
     for m, g in zip(ms, gs):
         backend = getattr(m, 'easier_jit_backend', 'torch')
         if backend not in ['cuda', 'cpu']:
@@ -283,7 +284,7 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
             ok = dynamic_replace_submodule(m, g, ext, node.name)
             if not ok:
                 raise RuntimeError(f"Failed to replace submodule {node.name}")
-    print(f"================================================")
+    logger.info("================================================")
     return ms, gs
 
 
