@@ -148,6 +148,16 @@ def _build_cuda_extension_from_src(name: str, src_path: str, snapshot_include_di
     code_hash = hash_key or "nohash"
     ext_name = f"new_{name}_{code_hash}"
 
+    # Detect CUDA arch using PyTorch, fallback to sm_70 if unavailable
+    def _get_cuda_arch_flag():
+        if torch.cuda.is_available():
+            major, minor = torch.cuda.get_device_capability()
+            # Convert to a valid arch
+            arch_code = f"sm_{major}{minor}"
+        else:
+            arch_code = "sm_70"
+        return f"-arch={arch_code}"
+
     ext = load(
         name=ext_name,
         sources=[src_path],
@@ -157,7 +167,11 @@ def _build_cuda_extension_from_src(name: str, src_path: str, snapshot_include_di
             "-O3",
             "--use_fast_math",
             "--expt-relaxed-constexpr",
-            _nvcc_threads_flag(),
+            "-Xptxas=-O3",
+            # "--disable-warnings",
+            # "--extra-device-vectorization",
+            _get_cuda_arch_flag(),
+            # _nvcc_threads_flag(),
             "-DNDEBUG",
         ],
         build_directory=os.path.dirname(src_path),
@@ -180,12 +194,12 @@ def _build_cpu_extension_from_src(name: str, src_path: str, snapshot_include_dir
 
     code_hash = hash_key or "nohash"
     ext_name = f"new_cpu_{name}_{code_hash}"
-
     ext = load(
         name=ext_name,
         sources=[src_path],
         extra_include_paths=[os.path.dirname(src_path), snapshot_include_dir, _repo_root()],
-        extra_cflags=["-O3", "-fopenmp", "-DNDEBUG", "-iquote", os.path.dirname(src_path)],
+        extra_cflags=["-O3", "-fopenmp", "-DNDEBUG", "-iquote", "-ffast-math",
+                      "-fno-math-errno", os.path.dirname(src_path)],
         extra_ldflags=["-fopenmp"],
         build_directory=os.path.dirname(src_path),
         keep_intermediates=False,
