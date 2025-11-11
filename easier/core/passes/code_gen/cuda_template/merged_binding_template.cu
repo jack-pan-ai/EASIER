@@ -13,6 +13,7 @@ namespace {
 template <typename ValueT, typename OffsetT>
 ${tuple_type_return} merged_spmv_launch_typed(
 ${function_params}
+  , torch::Tensor temp_storage
 ) {
 ${basic_checks}
 ${dtype_checks}
@@ -35,21 +36,26 @@ ${params_output_ptrs}
   params.num_nonzeros = static_cast<int>(ne);
 
   size_t temp_storage_bytes = 0;
-  void* d_temp_storage = nullptr;
   auto stream = at::cuda::getCurrentCUDAStream();
 
+  // Always do a clean size query with nullptr to avoid any invalid-pointer paths
+  void* d_temp_storage = nullptr;
   cudaError_t err = merged::merged_spmv_launch<ValueT, OffsetT>(
-      params, d_temp_storage, temp_storage_bytes, /*debug_synchronous=*/false, stream.stream());
+      params, /*d_temp_storage=*/nullptr, temp_storage_bytes, /*debug_synchronous=*/false, stream.stream());
   TORCH_CHECK(err == cudaSuccess, "merged_spmv_launch (size query) failed: ", cudaGetErrorString(err));
 
   if (temp_storage_bytes > 0) {
-    cudaError_t alloc_err = cudaMalloc(&d_temp_storage, temp_storage_bytes);
-    TORCH_CHECK(alloc_err == cudaSuccess, "cudaMalloc temp storage failed: ", cudaGetErrorString(alloc_err));
+    // In-place resize only: do not rebind to a new tensor or change device
+    TORCH_CHECK(temp_storage.defined(), "temp_storage must be provided as a CUDA uint8 tensor");
+    TORCH_CHECK(temp_storage.device() == ${dispatch_tensor}.device(), "temp_storage must be on the same device as inputs");
+    if (static_cast<size_t>(temp_storage.numel()) < temp_storage_bytes) {
+      temp_storage.resize_({static_cast<long long>(temp_storage_bytes)});
+    }
+    d_temp_storage = temp_storage.data_ptr();
   }
 
   err = merged::merged_spmv_launch<ValueT, OffsetT>(
       params, d_temp_storage, temp_storage_bytes, /*debug_synchronous=*/false, stream.stream());
-  if (d_temp_storage) { cudaFree(d_temp_storage); }
   TORCH_CHECK(err == cudaSuccess, "merged_spmv_launch failed: ", cudaGetErrorString(err));
 
   ${output_tuple_returns}
@@ -57,13 +63,14 @@ ${params_output_ptrs}
 
 ${tuple_type_return} merged_spmv_launch_bind(
 ${function_params}
+  , torch::Tensor temp_storage
 ) {
   TORCH_CHECK(${dispatch_tensor}.device().is_cuda(), "CUDA device required");
   switch (${dispatch_tensor}.scalar_type()) {
     case torch::kFloat:
-      return merged_spmv_launch_typed<float, int>(${function_call_args});
+      return merged_spmv_launch_typed<float, int>(${function_call_args}, temp_storage);
     case torch::kDouble:
-      return merged_spmv_launch_typed<double, int>(${function_call_args});
+      return merged_spmv_launch_typed<double, int>(${function_call_args}, temp_storage);
     ${optional_long_case}    
     default:
       std::cerr << "Unsupported dtype for ValueT. dtype code: " << static_cast<int>(${dispatch_tensor}.scalar_type()) << std::endl;
@@ -79,6 +86,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       &merged_spmv_launch_bind,
       "Run merged SpMV kernel"
 ${pybind_args}
+      , py::arg("temp_storage")
   );
 }
 

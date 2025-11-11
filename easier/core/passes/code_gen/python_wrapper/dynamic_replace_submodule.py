@@ -77,9 +77,9 @@ def _collect_selector_modules(gm) -> Tuple[List[Tuple[str, nn.Module]], Optional
     for _name, _module in gm.named_modules():
         if _name == "":
             continue
-        if type(_module) == Selector:
+        if isinstance(_module, Selector):
             selector_modules.append((_name, _module))
-        if type(_module) == Reducer:
+        if isinstance(_module, Reducer):
             reducer_mod = _module
             break
 
@@ -114,6 +114,19 @@ def _infer_gather_value_inputs(gm, selector_qnames: Iterable[str]) -> List[str]:
                 gather_inputs.append(pname)
 
     return gather_inputs
+
+
+def _set_qualified_submodule(root: nn.Module, qualname: str, new_module: nn.Module) -> None:
+    """
+    Replace a submodule referenced by its qualified name on the given root module.
+    """
+    if "." in qualname:
+        parent_name, leaf_name = qualname.rsplit(".", 1)
+        parent = root.get_submodule(parent_name)
+    else:
+        parent = root
+        leaf_name = qualname
+    setattr(parent, leaf_name, new_module)
 
 
 class _DynamicCudaWrapper(nn.Module):
@@ -153,11 +166,15 @@ class _DynamicCudaWrapper(nn.Module):
         self._non_gather_value_inputs = list(non_gather_value_inputs)
         self._gather_value_inputs = list(gather_value_inputs)
         self._selector_buf_names = buf_names
+        # temp storage buffer: defer alloc like bench wrapper (None until first call)
+        self.register_buffer("temp_storage", None, persistent=False)
+        # self.temp_storage = None
 
     def __call__(self, *args):
         # Map incoming args by placeholder name (preserve contiguity)
         arg_map: Dict[str, torch.Tensor] = {
-            name: arg.contiguous() for name, arg in zip(self._input_param_names, args)
+            name: (arg if arg.is_contiguous() else arg.contiguous())
+            for name, arg in zip(self._input_param_names, args)
         }
         device = next(iter(arg_map.values())).device
 
@@ -165,6 +182,8 @@ class _DynamicCudaWrapper(nn.Module):
             ro = self.row_end_offsets
             if ro.device != device:
                 ro = ro.to(device, non_blocking=True)
+                # persist on this device for subsequent calls
+                self.register_buffer("row_end_offsets", ro, persistent=False)
         else:
             # map only, this is fake ro input
             ro = torch.tensor([42], dtype=torch.int32, device=device)
@@ -174,6 +193,8 @@ class _DynamicCudaWrapper(nn.Module):
             gi = getattr(self, buf_name)
             if gi.device != device:
                 gi = gi.to(device, non_blocking=True)
+                # persist on this device for subsequent calls
+                self.register_buffer(buf_name, gi, persistent=False)
             gi_list.append(gi)
 
         # Determine gather source for num_cols
@@ -201,6 +222,21 @@ class _DynamicCudaWrapper(nn.Module):
             call_args.append(gi)
         # 4) CSR and sizes
         call_args.extend([ro, num_rows, num_cols])
+        # 5) temp storage tensor (uint8), create on first use to match bench wrapper semantics
+        ts = self.temp_storage
+        if ts is None:
+            ts = torch.empty(0, dtype=torch.uint8, device=device)
+            self.register_buffer("temp_storage", ts, persistent=False)
+        else:
+            if ts.dtype != torch.uint8:
+                # avoid DtoD copies by creating a fresh empty tensor with correct dtype
+                ts = torch.empty(0, dtype=torch.uint8, device=ts.device)
+                self.register_buffer("temp_storage", ts, persistent=False)
+            if ts.device != device:
+                # avoid DtoD copies by creating a fresh empty tensor on the target device
+                ts = torch.empty(0, dtype=torch.uint8, device=device)
+                self.register_buffer("temp_storage", ts, persistent=False)
+        call_args.append(ts)
 
         outs = self._ext.merged_spmv_launch(*call_args)
         if outs is not None:
@@ -265,7 +301,9 @@ def dynamic_replace_submodule(
             row_end_offsets=row_end_offsets,
         )
 
-        setattr(jit_graph, submodule_name, wrapper)
+        # Replace the submodule on the owning module using the qualified target path
+        # setattr(jit_graph, submodule_name, wrapper)
+        _set_qualified_submodule(submodule, node.target, wrapper)
         return True
 
     return False
