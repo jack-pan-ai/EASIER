@@ -222,21 +222,22 @@ class _DynamicCudaWrapper(nn.Module):
             call_args.append(gi)
         # 4) CSR and sizes
         call_args.extend([ro, num_rows, num_cols])
-        # 5) temp storage tensor (uint8), create on first use to match bench wrapper semantics
-        ts = self.temp_storage
-        if ts is None:
-            ts = torch.empty(0, dtype=torch.uint8, device=device)
-            self.register_buffer("temp_storage", ts, persistent=False)
-        else:
-            if ts.dtype != torch.uint8:
-                # avoid DtoD copies by creating a fresh empty tensor with correct dtype
-                ts = torch.empty(0, dtype=torch.uint8, device=ts.device)
-                self.register_buffer("temp_storage", ts, persistent=False)
-            if ts.device != device:
-                # avoid DtoD copies by creating a fresh empty tensor on the target device
+        # 5) temp storage tensor (uint8) only for CUDA path; CPU bindings don't take it
+        if device.type == "cuda":
+            ts = self.temp_storage
+            if ts is None:
                 ts = torch.empty(0, dtype=torch.uint8, device=device)
                 self.register_buffer("temp_storage", ts, persistent=False)
-        call_args.append(ts)
+            else:
+                if ts.dtype != torch.uint8:
+                    # avoid DtoD copies by creating a fresh empty tensor with correct dtype
+                    ts = torch.empty(0, dtype=torch.uint8, device=ts.device)
+                    self.register_buffer("temp_storage", ts, persistent=False)
+                if ts.device != device:
+                    # avoid DtoD copies by creating a fresh empty tensor on the target device
+                    ts = torch.empty(0, dtype=torch.uint8, device=device)
+                    self.register_buffer("temp_storage", ts, persistent=False)
+            call_args.append(ts)
 
         outs = self._ext.merged_spmv_launch(*call_args)
         if outs is not None:
