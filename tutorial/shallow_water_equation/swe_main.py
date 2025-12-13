@@ -4,10 +4,46 @@
 import argparse
 import os
 import torch
+import time
+import csv
+import os
 from tqdm import tqdm
 import numpy as np
 
 import easier as esr
+
+def run_profile_timing(eqn, args):
+    # warmup
+    num_warmup = 5 if args.device == 'cpu' else 50
+    print(f"Warming up {num_warmup} times")
+    for _ in range(num_warmup):
+        eqn()
+    num_times = 20 if args.device == 'cpu' else 100
+    print(f"Running {num_times} times")
+    if args.device == 'cuda':
+        torch.cuda.synchronize()
+    start_time = time.perf_counter()
+    for _ in range(num_times):
+        eqn()
+    if args.device == 'cuda':
+        torch.cuda.synchronize()
+    end_time = time.perf_counter()
+    elapsed = end_time - start_time
+    print(f"Time to run eqn() {num_times} times: {elapsed:.4f} seconds,\
+        {elapsed/num_times*1000:.4f} ms per iteration")
+    # Save timing result to a CSV file with device and backend in the path
+    if args.output:
+        csv_filename = f"{args.output}/timing_{args.device}_{args.backend}.csv"
+    else:
+        csv_filename = f"timing_{args.device}_{args.backend}.csv"
+    os.makedirs(os.path.dirname(csv_filename), exist_ok=True)
+    write_header = not os.path.exists(csv_filename)
+    with open(csv_filename, "a", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        if write_header:
+            writer.writerow(["num_times", "seconds", "ms_per_iteration"])
+        writer.writerow([num_times, f"{elapsed:.6f}", 
+                         f"{elapsed/num_times*1000:.4f}"])
 
 
 class ShallowWaterEquation(esr.Module):
@@ -150,8 +186,9 @@ if __name__ == "__main__":
 
     mkdir res
     torchrun --nnodes=1 --nproc_per_node=4 \
-        tutorial/shallow_water_equation/swe_main.py --backend=cpu res/ \
-        ~/.easier/triangular_100.hdf5 ~/.easier/SW_100.hdf5
+        tutorial/shallow_water_equation/swe_main.py --backend=cpu \
+            --device=cpu --comm_backend=gloo --output=res/ \
+            ~/.easier/triangular_100.hdf5 ~/.easier/SW_100.hdf5
     """
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -166,10 +203,34 @@ if __name__ == "__main__":
         default='gloo'
     )
     parser.add_argument("--dt", type=float, default=0.005)
+    parser.add_argument(
+        "--threads", type=int,
+        help="Torch intra-op thread count; also used for OMP/MKL/OPENBLAS if set",
+        default=20
+    )
+    parser.add_argument(
+        "--interop_threads", type=int,
+        help="Torch inter-op thread count",
+        default=1
+    )
     parser.add_argument("--output", type=str)
+    parser.add_argument("--profile", type=bool, default=False)
     parser.add_argument("mesh", type=str)
     parser.add_argument("shallow_water", type=str)
     args = parser.parse_args()
+
+    # Configure thread counts if provided so runs are repeatable.
+    if args.threads:
+        torch.set_num_threads(args.threads)
+        os.environ["OMP_NUM_THREADS"] = str(args.threads)
+        os.environ["MKL_NUM_THREADS"] = str(args.threads)
+        os.environ["OPENBLAS_NUM_THREADS"] = str(args.threads)
+    if args.interop_threads:
+        torch.set_num_interop_threads(args.interop_threads)
+    if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+        print(f"[cfg] torch threads={torch.get_num_threads()}, "
+              f"interop={torch.get_num_interop_threads()}, "
+              f"OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS')}")
 
     esr.init(args.comm_backend)
 
@@ -178,12 +239,15 @@ if __name__ == "__main__":
     )
     [eqn] = esr.compile([eqn], args.backend)
 
-    for i in tqdm(range(1000)):
-        if i % 10 == 0:
-            x = eqn.x.collect().cpu().numpy(),
-            y = eqn.y.collect().cpu().numpy(),
-            z = eqn.h.collect().cpu().numpy(),
-            if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                np.savez(f'{args.output}/data{i//10:03d}.npz', x=x, y=y, z=z)
-
-        eqn()
+    if not args.profile:
+        for i in tqdm(range(1000)):
+            eqn()
+            if i % 10 == 0:
+                x = eqn.x.collect().cpu().numpy(),
+                y = eqn.y.collect().cpu().numpy(),
+                z = eqn.h.collect().cpu().numpy(),
+                if int(os.environ.get("LOCAL_RANK", 0)) == 0:
+                    np.savez(f'{args.output}/data{i//10:03d}.npz', x=x, y=y, z=z)
+        
+    if args.profile:
+        run_profile_timing(eqn, args)

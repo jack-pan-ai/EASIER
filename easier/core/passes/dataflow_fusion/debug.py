@@ -213,11 +213,11 @@ def dump_visualized_fused_groups(
                 label_defs = [
                     '<<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0">',
                     '<TR>',
-                ] + [
-                    f'<TD PORT="a{i_arg}" COLSPAN="{
+                                ] + [
+                    f'<TD PORT="a{i_arg}" COLSPAN="{(
                         t_arg_colspan if i_arg + 1 < t_n_args
                         else t_arg_colspan + t_arg_colspan_rem
-                    }"></TD>'
+                    )}"></TD>'
                     for i_arg in range(t_n_args)
                 ] + [
                     '</TR>',
@@ -226,15 +226,16 @@ def dump_visualized_fused_groups(
                     '</TD></TR>',
                     '<TR>',
                 ] + [
-                    f'<TD PORT="u{i_user}" COLSPAN="{
+                    f'<TD PORT="u{i_user}" COLSPAN="{(
                         t_user_colspan if i_user + 1 < t_n_users
                         else t_user_colspan + t_user_colspan_rem
-                    }"></TD>'
+                    )}"></TD>'
                     for i_user in range(t_n_users)
                 ] + [
                     '</TR>',
                     '</TABLE>>',
                 ]
+
                 return ''.join(label_defs)
 
             if _renderable(ng):

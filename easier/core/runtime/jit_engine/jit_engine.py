@@ -1183,6 +1183,7 @@ class JitEngine:
         ms, gs = passes.fuse_dataflow(ms, gs)
         ms, gs = passes.analyze_life_range(ms, gs)
 
+        gs[0].print_tabular()
         ms, gs = passes.code_generation(ms, gs)
 
         [self.module], [self.graph] = ms, gs

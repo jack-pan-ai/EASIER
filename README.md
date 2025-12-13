@@ -55,8 +55,6 @@ torchrun --nnodes=1 --nproc_per_node=4 \
 # Visualize simulation results
 python tutorial/shallow_water_equation/swe_plot.py --data_dir res --filename swe.gif
 
-# Debug for code generation
-EASIER_VERBOSE_CODEGEN=1
 ```
 
 <div align="center">

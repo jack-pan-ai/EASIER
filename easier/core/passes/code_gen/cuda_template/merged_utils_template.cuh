@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdio>
+#include <type_traits>  // if you want to static_assert trivial copyability
 
 #include "data_struct_shared.cuh"
 
@@ -12,93 +13,75 @@
 template <typename OffsetT, typename ValueT, int Dim>
 struct TensorKey
 {
-    typedef ValueT Value;
+    using Value = ValueT;
+
     OffsetT key;
-    ValueT values[Dim];
+    ValueT  values[Dim];
 
-    // Constructor
-    __host__ __device__ __forceinline__ TensorKey()
-    {
-        #pragma unroll
-        for (int i = 0; i < Dim; ++i)
-            values[i] = 0.0f;
-    }
+    // =====================================================================
+    // Constructors & assignment – kept trivial / defaulted
+    // =====================================================================
 
-    // Constructor with values
-    __host__ __device__ __forceinline__ TensorKey(const ValueT *v)
+    // Default ctor: do NOT zero-initialize; user should call set() or
+    // a value ctor if they need zeroing. This keeps codegen lighter.
+    __host__ __device__ __forceinline__
+    TensorKey() = default;
+
+    // Trivial copy / assign – important for "trivially copyable"
+    __host__ __device__ __forceinline__
+    TensorKey(const TensorKey&) = default;
+
+    __host__ __device__ __forceinline__
+    TensorKey& operator=(const TensorKey&) = default;
+
+    // Trivial destructor
+    ~TensorKey() = default;
+
+    // Construct from value array (values only)
+    __host__ __device__ __forceinline__
+    explicit TensorKey(const ValueT* v)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
             values[i] = v[i];
     }
 
-    // Constructor with key and values
-    __host__ __device__ __forceinline__ TensorKey(const OffsetT &k, const ValueT *v) : key(k)
+    // Construct from key + value array
+    __host__ __device__ __forceinline__
+    TensorKey(OffsetT k, const ValueT* v)
+        : key(k)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
             values[i] = v[i];
     }
 
-    // Binary operators - optimized to avoid temporary variables
-    __host__ __device__ __forceinline__ TensorKey operator+(const TensorKey &other) const
+    // Construct from iterator (values only)
+    template <typename IteratorT>
+    __host__ __device__ __forceinline__
+    explicit TensorKey(IteratorT iter)
     {
-        TensorKey result = *this;
-        result += other;
-        return result;
+        #pragma unroll
+        for (int i = 0; i < Dim; ++i)
+            values[i] = static_cast<ValueT>(iter[i]);
     }
 
-    __host__ __device__ __forceinline__ TensorKey operator-(const TensorKey &other) const
-    {
-        TensorKey result = *this;
-        result -= other;
-        return result;
-    }
+    // =====================================================================
+    // Indexing
+    // =====================================================================
 
-    __host__ __device__ __forceinline__ TensorKey operator*(const TensorKey &other) const
-    {
-        TensorKey result = *this;
-        result *= other;
-        return result;
-    }
+    __host__ __device__ __forceinline__
+    ValueT& operator[](int idx)       { return values[idx]; }
 
-    __host__ __device__ __forceinline__ TensorKey operator/(const TensorKey &other) const
-    {
-        TensorKey result = *this;
-        result /= other;
-        return result;
-    }
+    __host__ __device__ __forceinline__
+    const ValueT& operator[](int idx) const { return values[idx]; }
 
-    __host__ __device__ __forceinline__ TensorKey operator+(ValueT scalar) const
-    {
-        TensorKey result = *this;
-        result += scalar;
-        return result;
-    }
+    // =====================================================================
+    // Compound assignment (TensorKey–TensorKey)
+    // =====================================================================
 
-    __host__ __device__ __forceinline__ TensorKey operator-(ValueT scalar) const
-    {
-        TensorKey result = *this;
-        result -= scalar;
-        return result;
-    }
-
-    __host__ __device__ __forceinline__ TensorKey operator*(ValueT scalar) const
-    {
-        TensorKey result = *this;
-        result *= scalar;
-        return result;
-    }
-
-    __host__ __device__ __forceinline__ TensorKey operator/(ValueT scalar) const
-    {
-        TensorKey result = *this;
-        result /= scalar;
-        return result;
-    }
-
-    // Compound assignment operators (more efficient, no temporaries)
-    __host__ __device__ __forceinline__ TensorKey& operator+=(const TensorKey &other)
+    __host__ __device__ __forceinline__
+    TensorKey& operator+=(const TensorKey& other)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
@@ -106,7 +89,8 @@ struct TensorKey
         return *this;
     }
 
-    __host__ __device__ __forceinline__ TensorKey& operator-=(const TensorKey &other)
+    __host__ __device__ __forceinline__
+    TensorKey& operator-=(const TensorKey& other)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
@@ -114,7 +98,8 @@ struct TensorKey
         return *this;
     }
 
-    __host__ __device__ __forceinline__ TensorKey& operator*=(const TensorKey &other)
+    __host__ __device__ __forceinline__
+    TensorKey& operator*=(const TensorKey& other)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
@@ -122,15 +107,22 @@ struct TensorKey
         return *this;
     }
 
-    __host__ __device__ __forceinline__ TensorKey& operator/=(const TensorKey &other)
+    __host__ __device__ __forceinline__
+    TensorKey& operator/=(const TensorKey& other)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
-            values[i] = (other.values[i] != 0.0) ? (values[i] / other.values[i]) : 0.0;
+            values[i] = (other.values[i] != ValueT(0)) ?
+                        (values[i] / other.values[i]) : ValueT(0);
         return *this;
     }
 
-    __host__ __device__ __forceinline__ TensorKey& operator+=(ValueT scalar)
+    // =====================================================================
+    // Compound assignment (TensorKey–scalar)
+    // =====================================================================
+
+    __host__ __device__ __forceinline__
+    TensorKey& operator+=(ValueT scalar)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
@@ -138,17 +130,8 @@ struct TensorKey
         return *this;
     }
 
-    
-    // Constructor with iterator
-    template<typename IteratorT>
-    __host__ __device__ __forceinline__ TensorKey(IteratorT iter)
-    {
-        #pragma unroll
-        for (int i = 0; i < Dim; ++i)
-            values[i] = static_cast<ValueT>(iter[i]);
-    }
-
-    __host__ __device__ __forceinline__ TensorKey& operator-=(ValueT scalar)
+    __host__ __device__ __forceinline__
+    TensorKey& operator-=(ValueT scalar)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
@@ -156,7 +139,8 @@ struct TensorKey
         return *this;
     }
 
-    __host__ __device__ __forceinline__ TensorKey& operator*=(ValueT scalar)
+    __host__ __device__ __forceinline__
+    TensorKey& operator*=(ValueT scalar)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
@@ -164,7 +148,8 @@ struct TensorKey
         return *this;
     }
 
-    __host__ __device__ __forceinline__ TensorKey& operator/=(ValueT scalar)
+    __host__ __device__ __forceinline__
+    TensorKey& operator/=(ValueT scalar)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
@@ -172,68 +157,110 @@ struct TensorKey
         return *this;
     }
 
-    __host__ __device__ __forceinline__ TensorKey& operator=(const TensorKey& other)
+    // =====================================================================
+    // Binary operators – built from compound ops (keeps code compact)
+    // =====================================================================
+
+    __host__ __device__ __forceinline__
+    TensorKey operator+(const TensorKey& other) const
     {
-        key = other.key;
-        if (this != &other) {  // Self-assignment check
-            #pragma unroll
-            for (int i = 0; i < Dim; ++i)
-                values[i] = other.values[i];
-        }
-        return *this;
+        TensorKey result = *this;
+        result += other;
+        return result;
     }
 
-    __host__ __device__ __forceinline__ TensorKey(const TensorKey& other)
+    __host__ __device__ __forceinline__
+    TensorKey operator-(const TensorKey& other) const
     {
-        key = other.key;
-        #pragma unroll
-        for (int i = 0; i < Dim; ++i)
-            values[i] = other.values[i];
+        TensorKey result = *this;
+        result -= other;
+        return result;
     }
 
-    // Indexing operator for value access
-    __host__ __device__ __forceinline__ ValueT &operator[](int idx)
+    __host__ __device__ __forceinline__
+    TensorKey operator*(const TensorKey& other) const
     {
-        return values[idx];
+        TensorKey result = *this;
+        result *= other;
+        return result;
     }
 
-    __host__ __device__ __forceinline__ const ValueT &operator[](int idx) const
+    __host__ __device__ __forceinline__
+    TensorKey operator/(const TensorKey& other) const
     {
-        return values[idx];
+        TensorKey result = *this;
+        result /= other;
+        return result;
     }
-    
-    // L2 norm (Euclidean norm)
-    __host__ __device__ __forceinline__ ValueT l2Norm() const
+
+    __host__ __device__ __forceinline__
+    TensorKey operator+(ValueT scalar) const
     {
-        ValueT sum = 0.0;
+        TensorKey result = *this;
+        result += scalar;
+        return result;
+    }
+
+    __host__ __device__ __forceinline__
+    TensorKey operator-(ValueT scalar) const
+    {
+        TensorKey result = *this;
+        result -= scalar;
+        return result;
+    }
+
+    __host__ __device__ __forceinline__
+    TensorKey operator*(ValueT scalar) const
+    {
+        TensorKey result = *this;
+        result *= scalar;
+        return result;
+    }
+
+    __host__ __device__ __forceinline__
+    TensorKey operator/(ValueT scalar) const
+    {
+        TensorKey result = *this;
+        result /= scalar;
+        return result;
+    }
+
+    // =====================================================================
+    // Norm and utility
+    // =====================================================================
+
+    __host__ __device__ __forceinline__
+    ValueT l2Norm() const
+    {
+        ValueT sum = ValueT(0);
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
             sum += values[i] * values[i];
         return sqrt(sum);
     }
 
-    // Function overloading: Set values from array
-    __host__ __device__ __forceinline__ void set(const ValueT* array)
+    __host__ __device__ __forceinline__
+    void set(const ValueT* array)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
             values[i] = array[i];
     }
 
-    __host__ __device__ __forceinline__ void set(const ValueT val)
+    __host__ __device__ __forceinline__
+    void set(ValueT val)
     {
         #pragma unroll
         for (int i = 0; i < Dim; ++i)
             values[i] = val;
     }
 
-    // Host-only print function
     __host__ void print() const
     {
         printf("Key: %d, Values: [", (int)key);
         for (int i = 0; i < Dim; ++i)
         {
-            printf("%.2f", values[i]);
+            printf("%.2f", static_cast<double>(values[i]));
             if (i < Dim - 1)
                 printf(", ");
         }
@@ -241,6 +268,9 @@ struct TensorKey
     }
 };
 
+// Optional: sanity check in a .cu or .cpp
+static_assert(std::is_trivially_copyable<TensorKey<int, float, 1>>::value,
+              "TensorKey should be trivially copyable");
 
 // FlexParams
 template <

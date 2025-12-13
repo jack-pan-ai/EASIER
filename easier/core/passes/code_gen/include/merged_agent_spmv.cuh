@@ -124,16 +124,17 @@ namespace merged
         };
 
         // Tensor and TensorKey for input vector x
-          typedef Tensor<ValueT, 1> TensorInput_truediv_T; 
-  typedef Tensor<ValueT, 1> TensorInput_p_T; 
-  typedef Tensor<ValueT, 1> TensorInput_r_T; 
+          typedef Tensor<ValueT, 1> TensorInput_scatter_6_T; 
+  typedef Tensor<ValueT, 1> TensorInput_area_T; 
+  typedef Tensor<ValueT, 1> TensorInput_h_T; 
 
 
         // Tensor and TensorKey for reducers 
         
-          typedef Tensor<ValueT, 1> TensorOutput_mul_1_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_add_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_setitem_1_T; 
+          typedef Tensor<ValueT, 1> TensorOutput_neg_6_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_truediv_12_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_63_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_add_36_T; 
 
 
         /// Shared memory type required by this thread block
@@ -160,9 +161,9 @@ namespace merged
         RowOffsetsIteratorT wd_row_end_offsets;
 
         // [code generation] wrapper pointers for loading the data
-          VectorValueIteratorT truediv_ptr; 
-  VectorValueIteratorT p_ptr; 
-  VectorValueIteratorT r_ptr; 
+          VectorValueIteratorT scatter_6_ptr; 
+  VectorValueIteratorT area_ptr; 
+  VectorValueIteratorT h_ptr; 
 
 
         //---------------------------------------------------------------------
@@ -178,9 +179,9 @@ namespace merged
             FlexParams<ValueT, OffsetT> &spmv_params) ///< SpMV input parameter bundle
             : temp_storage(temp_storage.Alias()),
                 wd_row_end_offsets(spmv_params.d_row_end_offsets),
-                  truediv_ptr(spmv_params.truediv_ptr), 
-    p_ptr(spmv_params.p_ptr), 
-    r_ptr(spmv_params.r_ptr), 
+                  scatter_6_ptr(spmv_params.scatter_6_ptr), 
+    area_ptr(spmv_params.area_ptr), 
+    h_ptr(spmv_params.h_ptr), 
 
               spmv_params(spmv_params)
         {
@@ -381,31 +382,33 @@ namespace merged
                 if (nonzero_idx < tile_num_nonzeros)
                 {
                     // [code generation]
-                        VectorValueIteratorT truediv_ptr_current = truediv_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_truediv_T truediv(truediv_ptr_current); 
-    VectorValueIteratorT p_ptr_current = p_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_p_T p(p_ptr_current); 
-    VectorValueIteratorT r_ptr_current = r_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_r_T r(r_ptr_current); 
+                        VectorValueIteratorT scatter_6_ptr_current = scatter_6_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
+    TensorInput_scatter_6_T scatter_6(scatter_6_ptr_current); 
+    VectorValueIteratorT area_ptr_current = area_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
+    TensorInput_area_T area(area_ptr_current); 
+    VectorValueIteratorT h_ptr_current = h_ptr +                     (tile_start_coord.y + nonzero_idx) * 1; 
+    TensorInput_h_T h(h_ptr_current); 
 
 
                     // map
-                        TensorOutput_mul_1_T mul_1 = truediv *                     p; 
-    TensorOutput_add_T add = r +                     mul_1; 
-  #pragma unroll 
-  for (int i = 0; i < 1; i++) 
-  { 
-    spmv_params.p_ptr[                (tile_start_coord.y + nonzero_idx) * 1 + i] =                     add.values[i]; 
-  } 
-  #pragma unroll 
-  for (int i = 0; i < 1; i++) 
-  { 
-    p.values[i] = add.values[i];
-  } 
+                        TensorOutput_neg_6_T neg_6 = -scatter_6; 
+    TensorOutput_truediv_12_T truediv_12 = neg_6 /                     area; 
+    TensorOutput_mul_63_T mul_63 = 0.00028571 *                     truediv_12; 
+    TensorOutput_add_36_T add_36 = h +                     mul_63; 
 
 
                     //output for map
-                    
+                      #pragma unroll 
+  for (int i = 0; i < 1; i++) 
+  { 
+    spmv_params.output_y_truediv_12_ptr[(tile_start_coord.y + nonzero_idx)                     * 1 + i] = truediv_12.values[i]; 
+  } 
+  #pragma unroll 
+  for (int i = 0; i < 1; i++) 
+  { 
+    spmv_params.output_y_add_36_ptr[(tile_start_coord.y + nonzero_idx)                     * 1 + i] = add_36.values[i]; 
+  } 
+
                 }
             }
 

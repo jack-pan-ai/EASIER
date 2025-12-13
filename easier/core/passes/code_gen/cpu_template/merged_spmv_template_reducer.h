@@ -102,7 +102,8 @@ void OmpMergeSystem(
   // input and output tensors types
   ${input_agent_tenosrs_code} ${map_agent_tenosrs_code} ${output_agent_tenosrs_code}
 
-#pragma omp parallel for schedule(static) num_threads(num_threads)
+// #pragma omp parallel for schedule(static) num_threads(num_threads)
+#pragma omp parallel num_threads(num_threads)
   for (int tid = 0; tid < num_threads; tid++) {
     OffsetT num_merge_items =
         num_rows + num_nonzeros; // Merge path total length

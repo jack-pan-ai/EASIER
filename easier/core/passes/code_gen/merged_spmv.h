@@ -96,18 +96,49 @@ template <typename ValueT, typename OffsetT>
 void OmpMergeSystem(
     int num_threads,
     // [code generation]
-      ValueT *__restrict truediv_ptr, 
-  ValueT *__restrict p_ptr, 
-  ValueT *__restrict r_ptr, 
+      ValueT *__restrict points_ptr, 
+  ValueT *__restrict truediv_5_ptr, 
+  ValueT *__restrict bsx_ptr, 
+  ValueT *__restrict bsy_ptr, 
+  OffsetT *__restrict selector_bp_0_ptr, 
+  OffsetT *__restrict selector_bp_1_ptr, 
+  OffsetT *__restrict bselector_ptr, 
  int num_rows, int num_nonzeros) {
   // [code generation]
   // input and output tensors types
-    typedef Tensor<ValueT, 1> TensorInput_truediv_T; 
-  typedef Tensor<ValueT, 1> TensorInput_p_T; 
-  typedef Tensor<ValueT, 1> TensorInput_r_T; 
-   typedef Tensor<ValueT, 1> TensorOutput_mul_1_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_add_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_setitem_1_T; 
+    typedef Tensor<ValueT, 2> TensorInput_points_T; 
+  typedef Tensor<ValueT, 2> TensorInput_truediv_5_T; 
+  typedef Tensor<ValueT, 1> TensorInput_bsx_T; 
+  typedef Tensor<ValueT, 1> TensorInput_bsy_T; 
+   typedef Tensor<ValueT, 1> TensorOutput_getitem_68_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_68_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_getitem_69_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_69_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_getitem_70_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_70_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_getitem_71_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_71_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_getitem_72_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_72_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_getitem_73_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_73_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_71_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_72_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_48_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_73_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_74_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_49_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_75_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sign_6_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_76_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_50_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_neg_6_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_77_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_51_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_neg_7_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_setitem_13_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_neg_8_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_setitem_14_T; 
   
 
 #pragma omp parallel for schedule(static) num_threads(num_threads)
@@ -131,21 +162,59 @@ void OmpMergeSystem(
     
     for (; thread_coord.y < thread_coord_end.y; ++thread_coord.y) {
       // selector
-        TensorInput_truediv_T truediv(truediv_ptr +                     thread_coord.y * 1); 
-  TensorInput_p_T p(p_ptr +                     thread_coord.y * 1); 
-  TensorInput_r_T r(r_ptr +                     thread_coord.y * 1); 
+        TensorInput_bsx_T bsx(bsx_ptr +                     thread_coord.y * 1); 
+  TensorInput_bsy_T bsy(bsy_ptr +                     thread_coord.y * 1); 
+  OffsetT column_indices_selector_bp_0 = selector_bp_0_ptr[thread_coord.y]; 
+  TensorInput_points_T selector_bp_0(points_ptr +                     column_indices_selector_bp_0 * 2); 
+  OffsetT column_indices_selector_bp_1 = selector_bp_1_ptr[thread_coord.y]; 
+  TensorInput_points_T selector_bp_1(points_ptr +                     column_indices_selector_bp_1 * 2); 
+  OffsetT column_indices_bselector = bselector_ptr[thread_coord.y]; 
+  TensorInput_truediv_5_T bselector(truediv_5_ptr +                     column_indices_bselector * 2); 
 
 
       // mapping
-          TensorOutput_mul_1_T mul_1 =                     truediv * p; 
-    TensorOutput_add_T add =                     r + mul_1; 
+          TensorOutput_getitem_68_T                         getitem_68(bselector.values[0]); 
+    TensorOutput_clone_68_T clone_68(getitem_68); 
+    TensorOutput_getitem_69_T                         getitem_69(bselector.values[1]); 
+    TensorOutput_clone_69_T clone_69(getitem_69); 
+    TensorOutput_getitem_70_T                         getitem_70(selector_bp_0.values[0]); 
+    TensorOutput_clone_70_T clone_70(getitem_70); 
+    TensorOutput_getitem_71_T                         getitem_71(selector_bp_0.values[1]); 
+    TensorOutput_clone_71_T clone_71(getitem_71); 
+    TensorOutput_getitem_72_T                         getitem_72(selector_bp_1.values[0]); 
+    TensorOutput_clone_72_T clone_72(getitem_72); 
+    TensorOutput_getitem_73_T                         getitem_73(selector_bp_1.values[1]); 
+    TensorOutput_clone_73_T clone_73(getitem_73); 
+    TensorOutput_sub_71_T sub_71 =                 clone_70 - clone_72; 
+    TensorOutput_sub_72_T sub_72 =                 clone_69 - clone_73; 
+    TensorOutput_mul_48_T mul_48 =                     sub_71 * sub_72; 
+    TensorOutput_sub_73_T sub_73 =                 clone_71 - clone_73; 
+    TensorOutput_sub_74_T sub_74 =                 clone_68 - clone_72; 
+    TensorOutput_mul_49_T mul_49 =                     sub_73 * sub_74; 
+    TensorOutput_sub_75_T sub_75 =                 mul_48 - mul_49; 
+    TensorOutput_sign_6_T sign_6 = sub_75.sign(); 
+    TensorOutput_sub_76_T sub_76 =                 clone_71 - clone_73; 
+    TensorOutput_mul_50_T mul_50 =                     sign_6 * sub_76; 
+    TensorOutput_neg_6_T neg_6 =                     -sign_6; 
+    TensorOutput_sub_77_T sub_77 =                 clone_70 - clone_72; 
+    TensorOutput_mul_51_T mul_51 =                     neg_6 * sub_77; 
+    TensorOutput_neg_7_T neg_7 =                     -mul_50; 
   for (int i = 0; i < 1; i++) 
   { 
-    p_ptr[thread_coord.y * 1 + i] = add.values[i]; 
+    bsx_ptr[thread_coord.y * 1 + i] = neg_7.values[i]; 
   } 
   for (int i = 0; i < 1; i++) 
   { 
-    p.values[i] = add.values[i];
+    bsx.values[i] = neg_7.values[i];
+  } 
+    TensorOutput_neg_8_T neg_8 =                     -mul_51; 
+  for (int i = 0; i < 1; i++) 
+  { 
+    bsy_ptr[thread_coord.y * 1 + i] = neg_8.values[i]; 
+  } 
+  for (int i = 0; i < 1; i++) 
+  { 
+    bsy.values[i] = neg_8.values[i];
   } 
 
 

@@ -2,9 +2,12 @@
 # Licensed under the MIT License.
 
 import os
+import sys
+import json
 import tempfile
 import shutil
 import hashlib
+import importlib.util
 import concurrent.futures
 import torch
 import fcntl
@@ -12,7 +15,8 @@ import contextlib
 import easier.core.module as esr
 
 from torch.utils.cpp_extension import load
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
+from types import ModuleType
 
 from torch.fx.node import Node
 from easier.core.runtime.modules import HaloExchanger
@@ -34,6 +38,129 @@ def _repo_root() -> str:
     # this file: EASIER/easier/core/passes/codegen.py -> easier/core/passes
     # project root for generated files/templates: EASIER/easier/core/passes/code_gen
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "passes", "code_gen"))
+
+
+def _jit_cache_requested() -> bool:
+    env = os.getenv("EASIER_DISABLE_JIT_HASH", "")
+    return env.strip().lower() in {"1", "true", "yes"}
+
+
+def _cache_root_dir() -> str:
+    root = os.path.join(tempfile.gettempdir(), "easier_codegen_cache")
+    os.makedirs(root, exist_ok=True)
+    return root
+
+
+def _cache_entry_dir(backend: str, node_name: str) -> str:
+    safe_name = node_name.replace(os.sep, "_")
+    return os.path.join(_cache_root_dir(), backend, safe_name)
+
+
+def _cache_snapshot_filename(backend: str, node_name: str) -> str:
+    if backend == "cpu":
+        return f"merged_binding_cpu_{node_name}.cpp"
+    return f"merged_binding_{node_name}.cu"
+
+
+def _load_cached_snapshot(backend: str, node_name: str) -> Optional[Tuple[str, str, str]]:
+    if not _jit_cache_requested():
+        return None
+    cache_dir = _cache_entry_dir(backend, node_name)
+    hash_file = os.path.join(cache_dir, ".hash")
+    src_file = os.path.join(cache_dir, _cache_snapshot_filename(backend, node_name))
+    inc_dir = os.path.join(cache_dir, "include")
+    if not (os.path.isfile(src_file) and os.path.isdir(inc_dir) and os.path.isfile(hash_file)):
+        return None
+    try:
+        with open(hash_file, "r") as f:
+            combined_hash = f.read().strip() or "nohash"
+    except OSError:
+        return None
+    return src_file, inc_dir, combined_hash
+
+
+def _persist_snapshot_cache(
+    backend: str, node_name: str, snap_src: str, snap_inc: str, combined_hash: str
+) -> Optional[Tuple[str, str, str]]:
+    if not _jit_cache_requested():
+        return None
+    cache_dir = _cache_entry_dir(backend, node_name)
+    os.makedirs(os.path.dirname(cache_dir), exist_ok=True)
+    snapshot_root = os.path.dirname(snap_src)
+    try:
+        if os.path.exists(cache_dir):
+            shutil.rmtree(cache_dir)
+        shutil.copytree(snapshot_root, cache_dir)
+        hash_file = os.path.join(cache_dir, ".hash")
+        with open(hash_file, "w") as f:
+            f.write(combined_hash)
+    except OSError:
+        logger.warning("Failed to persist snapshot cache for %s:%s", backend, node_name)
+        return None
+    rel_inc = os.path.relpath(snap_inc, snapshot_root)
+    if rel_inc.startswith(".."):
+        rel_inc = os.path.basename(snap_inc)
+    cached_src = os.path.join(cache_dir, os.path.basename(snap_src))
+    cached_inc = os.path.join(cache_dir, rel_inc)
+    return cached_src, cached_inc, combined_hash
+
+
+def _cached_extension_meta_path(backend: str, node_name: str) -> str:
+    return os.path.join(_cache_entry_dir(backend, node_name), ".ext_meta")
+
+
+def _persist_compiled_extension(backend: str, node_name: str, module: ModuleType):
+    if not _jit_cache_requested():
+        return
+    cache_dir = _cache_entry_dir(backend, node_name)
+    so_path = getattr(module, "__file__", None)
+    if not so_path or not os.path.isfile(so_path):
+        return
+    bin_name = os.path.basename(so_path)
+    dst_path = os.path.join(cache_dir, bin_name)
+    try:
+        if os.path.abspath(so_path) != os.path.abspath(dst_path):
+            shutil.copyfile(so_path, dst_path)
+        meta = {"module_name": module.__name__, "binary": bin_name}
+        with open(_cached_extension_meta_path(backend, node_name), "w") as f:
+            json.dump(meta, f)
+    except OSError:
+        logger.warning("Failed to persist compiled extension cache for %s:%s", backend, node_name)
+
+
+def _load_cached_extension_module(backend: str, node_name: str) -> Optional[ModuleType]:
+    if not _jit_cache_requested():
+        return None
+    cache_dir = _cache_entry_dir(backend, node_name)
+    print(f"Loading cached extension from directory: {cache_dir}")
+    meta_path = _cached_extension_meta_path(backend, node_name)
+    if not os.path.isfile(meta_path):
+        return None
+    try:
+        with open(meta_path, "r") as f:
+            meta = json.load(f)
+        module_name = meta.get("module_name", "")
+        bin_name = meta.get("binary", "")
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not module_name or not bin_name:
+        return None
+    so_path = os.path.join(cache_dir, bin_name)
+    if not os.path.isfile(so_path):
+        return None
+    if module_name in sys.modules:
+        return sys.modules[module_name]
+    try:
+        spec = importlib.util.spec_from_file_location(module_name, so_path)
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sys.modules[module_name] = module
+        return module
+    except Exception:
+        logger.warning("Failed to load cached extension for %s:%s", backend, node_name, exc_info=True)
+        return None
 
 
 def _hash_directory_tree(root_dir: str) -> str:
@@ -228,6 +355,7 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
 
     # Collect build jobs across modules first (generation + snapshot)
     build_jobs: List[Tuple[str, str, str, str, object]] = []
+    prebuilt_extensions: Dict[str, object] = {}
     
     logger.info("================================================")
     for m, g in zip(ms, gs):
@@ -243,18 +371,30 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
         for node_name, node, submod in callmods:
             logger.info(f"Node: {node_name}")
             # submod.graph.print_tabular()
-            if backend == 'cuda':
+            cached_module = _load_cached_extension_module(backend, node_name)
+            if cached_module is not None:
+                logger.info(f"Reusing cached compiled extension for {node_name}")
+                prebuilt_extensions[node_name] = cached_module
+                continue
+            cached_snapshot = _load_cached_snapshot(backend, node_name)
+            if cached_snapshot is not None:
+                snap_src, snap_inc, combined_hash = cached_snapshot
+            elif backend == 'cuda':
                 # Serialize only the codegen + snapshot to avoid shared-file contention
                 with _codegen_lock():
                     generate_cuda_code_from_graph(submod, g)
                     snap_src, snap_inc, combined_hash = _snapshot_generated_source_cuda(node_name)
+                cached = _persist_snapshot_cache(backend, node_name, snap_src, snap_inc, combined_hash)
+                if cached is not None:
+                    snap_src, snap_inc, combined_hash = cached
             elif backend == 'cpu':
                 # Serialize only the codegen + snapshot to avoid shared-file contention
                 with _codegen_lock():
                     generate_cpu_code_from_graph(submod, g)
                     snap_src, snap_inc, combined_hash = _snapshot_generated_source_cpu(node_name)
-            elif backend == 'torch':
-                continue
+                cached = _persist_snapshot_cache(backend, node_name, snap_src, snap_inc, combined_hash)
+                if cached is not None:
+                    snap_src, snap_inc, combined_hash = cached
             else:
                 raise ValueError(f"Invalid backend {backend}")
             build_jobs.append((backend, node_name, snap_src, snap_inc, combined_hash))
@@ -262,11 +402,11 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
     # Build in parallel per job
     logger.info("================================================")
     logger.info("Building extensions in parallel")
-    built_extensions: Dict[str, object] = {}
+    built_extensions: Dict[str, object] = dict(prebuilt_extensions)
     if build_jobs:
         n_workers = min(len(build_jobs), max(1, (os.cpu_count() or 2) // 2))
         with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
-            future_map = {}
+            future_map: Dict[str, Tuple[str, concurrent.futures.Future]] = {}
             for backend, node_name, snap_src, snap_inc, h in build_jobs:
                 if backend == 'cuda':
                     fut = executor.submit(_build_cuda_extension_from_src, node_name, snap_src, snap_inc, h)
@@ -276,9 +416,11 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
                     continue
                 else:
                     raise ValueError(f"Invalid backend {backend}")
-                future_map[node_name] = fut
-            for node_name, fut in future_map.items():
-                built_extensions[node_name] = fut.result()
+                future_map[node_name] = (backend, fut)
+            for node_name, (backend, fut) in future_map.items():
+                ext = fut.result()
+                built_extensions[node_name] = ext
+                _persist_compiled_extension(backend, node_name, ext)
 
     # Replace submodules sequentially to preserve semantics
     logger.info("================================================")

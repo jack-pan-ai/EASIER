@@ -80,62 +80,53 @@ TENSOR_INLINE T tensor_sign(T x) {
 template <typename ValueT, int Dim>
 struct Tensor
 {
-    // Type aliases
-    typedef ValueT Value;
-    
-    // Data storage
+    using Value = ValueT;
+
+    // Data storage: plain array, trivially copyable
     ValueT values[Dim];
 
-    // =============================================================================
-    // Constructors and Assignment
-    // =============================================================================
-    
-    TENSOR_INLINE Tensor()
+    // =====================================================================
+    // Constructors & Assignment & cooy (kept as trivial as possible)
+    // This makes the Tensor struct trivially copyable (local memory will
+    // not be used)
+    // =====================================================================
+
+    // 1) Default ctor: DO NOT zero-initialize.
+    //    Let the user explicitly call .set() or operator=(scalar) when needed.
+    //    This keeps Tensor POD-like and cheaper to allocate.
+    TENSOR_INLINE Tensor() = default;
+
+    // 2) Copy / move: defaulted => trivial
+    TENSOR_INLINE Tensor(const Tensor&) = default;
+    TENSOR_INLINE Tensor& operator=(const Tensor&) = default;
+
+    // 3) Broadcast from scalar: works for any Dim (including Dim==1).
+    TENSOR_INLINE explicit Tensor(ValueT val)
     {
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
-            values[i] = 0.0f;
+            values[i] = val;
     }
 
-    TENSOR_INLINE Tensor(const ValueT val)
-    {
-        static_assert(Dim == 1, "Tensor must be 1D");
-        values[0] = val;
-    }
-
-    TENSOR_INLINE Tensor(const ValueT *v)
+    // 4) Construct from pointer
+    TENSOR_INLINE explicit Tensor(const ValueT* v)
     {
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
             values[i] = v[i];
     }
 
-    template<typename IteratorT>
-    TENSOR_INLINE Tensor(IteratorT iter)
+    // 5) Construct from iterator-like (kept, but simple)
+    template <typename IteratorT>
+    TENSOR_INLINE explicit Tensor(IteratorT iter)
     {
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
             values[i] = static_cast<ValueT>(iter[i]);
     }
 
-    TENSOR_INLINE Tensor(const Tensor& other)
-    {
-        TENSOR_PRAGMA_UNROLL
-        for (int i = 0; i < Dim; ++i)
-            values[i] = other.values[i];
-    }
-
-    TENSOR_INLINE Tensor& operator=(const Tensor& other)
-    {
-        if (this != &other) {
-            TENSOR_PRAGMA_UNROLL
-            for (int i = 0; i < Dim; ++i)
-                values[i] = other.values[i];
-        }
-        return *this;
-    }
-
-    TENSOR_INLINE Tensor& operator=(const ValueT val)
+    // 6) Assign from scalar: broadcast
+    TENSOR_INLINE Tensor& operator=(ValueT val)
     {
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
@@ -143,31 +134,31 @@ struct Tensor
         return *this;
     }
 
-    // =============================================================================
+    // =====================================================================
     // Element Access
-    // =============================================================================
-    
-    TENSOR_INLINE ValueT &operator[](int idx) { return values[idx]; }
-    TENSOR_INLINE const ValueT &operator[](int idx) const { return values[idx]; }
+    // =====================================================================
 
-    // =============================================================================
-    // Unary Operators
-    // =============================================================================
-    
+    TENSOR_INLINE ValueT& operator[](int idx)       { return values[idx]; }
+    TENSOR_INLINE const ValueT& operator[](int idx) const { return values[idx]; }
+
+    // =====================================================================
+    // Unary
+    // =====================================================================
+
     TENSOR_INLINE Tensor operator-() const
     {
-        Tensor result;
+        Tensor result;   // uninitialized; we fully overwrite it below
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
             result.values[i] = -values[i];
         return result;
     }
 
-    // =============================================================================
-    // Compound Assignment Operators (Tensor-Tensor)
-    // =============================================================================
-    
-    TENSOR_INLINE Tensor& operator+=(const Tensor &other)
+    // =====================================================================
+    // Compound assignment (Tensor-Tensor)
+    // =====================================================================
+
+    TENSOR_INLINE Tensor& operator+=(const Tensor& other)
     {
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
@@ -175,7 +166,7 @@ struct Tensor
         return *this;
     }
 
-    TENSOR_INLINE Tensor& operator-=(const Tensor &other)
+    TENSOR_INLINE Tensor& operator-=(const Tensor& other)
     {
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
@@ -183,7 +174,7 @@ struct Tensor
         return *this;
     }
 
-    TENSOR_INLINE Tensor& operator*=(const Tensor &other)
+    TENSOR_INLINE Tensor& operator*=(const Tensor& other)
     {
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
@@ -191,15 +182,16 @@ struct Tensor
         return *this;
     }
 
-    TENSOR_INLINE Tensor& operator/=(const Tensor &other)
+    TENSOR_INLINE Tensor& operator/=(const Tensor& other)
     {
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
-            values[i] = (other.values[i] != 0.0) ? (values[i] / other.values[i]) : 0.0;
+            values[i] = (other.values[i] != ValueT(0)) ?
+                         (values[i] / other.values[i]) : ValueT(0);
         return *this;
     }
 
-    TENSOR_INLINE Tensor& operator^=(const Tensor &other)
+    TENSOR_INLINE Tensor& operator^=(const Tensor& other)
     {
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
@@ -207,10 +199,10 @@ struct Tensor
         return *this;
     }
 
-    // =============================================================================
-    // Compound Assignment Operators (Tensor-Scalar)
-    // =============================================================================
-    
+    // =====================================================================
+    // Compound assignment (Tensor-Scalar)
+    // =====================================================================
+
     TENSOR_INLINE Tensor& operator+=(ValueT scalar)
     {
         TENSOR_PRAGMA_UNROLL
@@ -251,28 +243,80 @@ struct Tensor
         return *this;
     }
 
-    // =============================================================================
-    // Binary Operators - Auto-generated from compound assignments
-    // =============================================================================
-    
-    // Tensor-Tensor operations
-    TENSOR_INLINE Tensor operator+(const Tensor &other) const { Tensor result = *this; result += other; return result; }
-    TENSOR_INLINE Tensor operator-(const Tensor &other) const { Tensor result = *this; result -= other; return result; }
-    TENSOR_INLINE Tensor operator*(const Tensor &other) const { Tensor result = *this; result *= other; return result; }
-    TENSOR_INLINE Tensor operator/(const Tensor &other) const { Tensor result = *this; result /= other; return result; }
-    TENSOR_INLINE Tensor operator^(const Tensor &other) const { Tensor result = *this; result ^= other; return result; }
+    // =====================================================================
+    // Binary operators (built from in-place ops), but
+    // they don't pay for zeroing via default ctor. 
+    // So, it's trivially copyable.
+    // =====================================================================
 
-    // Tensor-Scalar operations  
-    TENSOR_INLINE Tensor operator+(ValueT scalar) const { Tensor result = *this; result += scalar; return result; }
-    TENSOR_INLINE Tensor operator-(ValueT scalar) const { Tensor result = *this; result -= scalar; return result; }
-    TENSOR_INLINE Tensor operator*(ValueT scalar) const { Tensor result = *this; result *= scalar; return result; }
-    TENSOR_INLINE Tensor operator/(ValueT scalar) const { Tensor result = *this; result /= scalar; return result; }
-    TENSOR_INLINE Tensor operator^(ValueT scalar) const { Tensor result = *this; result ^= scalar; return result; }
+    TENSOR_INLINE Tensor operator+(const Tensor& other) const
+    {
+        Tensor result = *this;
+        result += other;
+        return result;
+    }
 
-    // =============================================================================
-    // Utility Methods
-    // =============================================================================
-    
+    TENSOR_INLINE Tensor operator-(const Tensor& other) const
+    {
+        Tensor result = *this;
+        result -= other;
+        return result;
+    }
+
+    TENSOR_INLINE Tensor operator*(const Tensor& other) const
+    {
+        Tensor result = *this;
+        result *= other;
+        return result;
+    }
+
+    TENSOR_INLINE Tensor operator/(const Tensor& other) const
+    {
+        Tensor result = *this;
+        result /= other;
+        return result;
+    }
+
+    // Tensor-Scalar
+    TENSOR_INLINE Tensor operator+(ValueT scalar) const
+    {
+        Tensor result = *this;
+        result += scalar;
+        return result;
+    }
+
+    TENSOR_INLINE Tensor operator-(ValueT scalar) const
+    {
+        Tensor result = *this;
+        result -= scalar;
+        return result;
+    }
+
+    TENSOR_INLINE Tensor operator*(ValueT scalar) const
+    {
+        Tensor result = *this;
+        result *= scalar;
+        return result;
+    }
+
+    TENSOR_INLINE Tensor operator/(ValueT scalar) const
+    {
+        Tensor result = *this;
+        result /= scalar;
+        return result;
+    }
+
+    TENSOR_INLINE Tensor operator^(ValueT scalar) const
+    {
+        Tensor result = *this;
+        result ^= scalar;
+        return result;
+    }
+
+    // =====================================================================
+    // Utility methods (kept, just using the simpler core)
+    // =====================================================================
+
     TENSOR_INLINE Tensor pow(ValueT exponent) const
     {
         Tensor result;
@@ -282,7 +326,7 @@ struct Tensor
         return result;
     }
 
-    TENSOR_INLINE Tensor pow(const Tensor &exponents) const
+    TENSOR_INLINE Tensor pow(const Tensor& exponents) const
     {
         Tensor result;
         TENSOR_PRAGMA_UNROLL
@@ -318,16 +362,13 @@ struct Tensor
         return result;
     }
 
-    // =============================================================================
-    // Comparison with scalar (produces 0/1 mask in ValueT)
-    // =============================================================================
-    
+    // comparisons with scalar
     TENSOR_INLINE Tensor lt(ValueT scalar) const
     {
         Tensor result;
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
-            result.values[i] = (values[i] < scalar) ? static_cast<ValueT>(1) : static_cast<ValueT>(0);
+            result.values[i] = (values[i] < scalar) ? ValueT(1) : ValueT(0);
         return result;
     }
 
@@ -336,16 +377,16 @@ struct Tensor
         Tensor result;
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
-            result.values[i] = (values[i] > scalar) ? static_cast<ValueT>(1) : static_cast<ValueT>(0);
+            result.values[i] = (values[i] > scalar) ? ValueT(1) : ValueT(0);
         return result;
     }
 
-    TENSOR_INLINE Tensor operator<(ValueT scalar) const { return this->lt(scalar); }
-    TENSOR_INLINE Tensor operator>(ValueT scalar) const { return this->gt(scalar); }
+    TENSOR_INLINE Tensor operator<(ValueT scalar) const { return lt(scalar); }
+    TENSOR_INLINE Tensor operator>(ValueT scalar) const { return gt(scalar); }
 
     TENSOR_INLINE ValueT l2Norm() const
     {
-        ValueT sum = 0.0;
+        ValueT sum = ValueT(0);
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
             sum += values[i] * values[i];
@@ -359,7 +400,7 @@ struct Tensor
             values[i] = array[i];
     }
 
-    TENSOR_INLINE void set(const ValueT val)
+    TENSOR_INLINE void set(ValueT val)
     {
         TENSOR_PRAGMA_UNROLL
         for (int i = 0; i < Dim; ++i)
@@ -369,51 +410,57 @@ struct Tensor
     TENSOR_HOST_ONLY void print() const
     {
         printf("Values: [");
-        for (int i = 0; i < Dim; ++i)
-        {
-            printf("%.2f", values[i]);
-            if (i < Dim - 1)
-                printf(", ");
+        for (int i = 0; i < Dim; ++i) {
+            printf("%.2f", static_cast<double>(values[i]));
+            if (i < Dim - 1) printf(", ");
         }
         printf("]\n");
     }
 };
+
 
 // =============================================================================
 // Scalar-Tensor Binary Operators
 // =============================================================================
 
 template <typename ValueT, int Dim>
-TENSOR_INLINE Tensor<ValueT, Dim> operator*(ValueT scalar, const Tensor<ValueT, Dim>& tensor) { return tensor * scalar; }
-
-template <typename ValueT, int Dim>
-TENSOR_INLINE Tensor<ValueT, Dim> operator+(ValueT scalar, const Tensor<ValueT, Dim>& tensor) { return tensor + scalar; }
-
-template <typename ValueT, int Dim>
-TENSOR_INLINE Tensor<ValueT, Dim> operator-(ValueT scalar, const Tensor<ValueT, Dim>& tensor)
-{
-    Tensor<ValueT, Dim> result;
-    TENSOR_PRAGMA_UNROLL
-    for (int i = 0; i < Dim; ++i) result.values[i] = scalar - tensor.values[i];
-    return result;
+TENSOR_INLINE Tensor<ValueT, Dim> operator*(
+    ValueT scalar, 
+    const Tensor<ValueT, Dim>& tensor
+) { 
+    return tensor * scalar; 
 }
 
 template <typename ValueT, int Dim>
-TENSOR_INLINE Tensor<ValueT, Dim> operator/(ValueT scalar, const Tensor<ValueT, Dim>& tensor)
-{
-    Tensor<ValueT, Dim> result;
-    TENSOR_PRAGMA_UNROLL
-    for (int i = 0; i < Dim; ++i) result.values[i] = (tensor.values[i] != 0.0) ? (scalar / tensor.values[i]) : 0.0;
-    return result;
+TENSOR_INLINE Tensor<ValueT, Dim> operator+(
+    ValueT scalar, 
+    const Tensor<ValueT, Dim>& tensor
+) { 
+    return tensor + scalar; 
 }
 
 template <typename ValueT, int Dim>
-TENSOR_INLINE Tensor<ValueT, Dim> operator^(ValueT scalar, const Tensor<ValueT, Dim>& tensor)
-{
-    Tensor<ValueT, Dim> result;
-    TENSOR_PRAGMA_UNROLL
-    for (int i = 0; i < Dim; ++i) result.values[i] = tensor_pow(scalar, tensor.values[i]);
-    return result;
+TENSOR_INLINE Tensor<ValueT, Dim> operator-(
+    ValueT scalar, 
+    const Tensor<ValueT, Dim>& tensor
+) { 
+    return tensor - scalar;
+}
+
+template <typename ValueT, int Dim>
+TENSOR_INLINE Tensor<ValueT, Dim> operator/(
+    ValueT scalar, 
+    const Tensor<ValueT, Dim>& tensor
+) {
+    return tensor / scalar;
+}
+
+template <typename ValueT, int Dim>
+TENSOR_INLINE Tensor<ValueT, Dim> operator^(
+    ValueT scalar, 
+    const Tensor<ValueT, Dim>& tensor
+) {
+    return tensor ^ scalar;
 }
 
 // =============================================================================
@@ -659,3 +706,56 @@ TENSOR_INLINE Tensor<ValueT, (N > M ? N : M)> operator>(const Tensor<ValueT, N>&
 }
 
 #undef DEFINE_BROADCASTING_OP
+
+// =============================================================================
+// Tensor Operations in place computation
+// =============================================================================
+template <typename ValueT, int Dim>
+TENSOR_INLINE void add_tensor(const Tensor<ValueT, Dim> &lhs,
+                              const Tensor<ValueT, Dim> &rhs,
+                              Tensor<ValueT, Dim> &out)
+{
+    TENSOR_PRAGMA_UNROLL
+    for (int i = 0; i < Dim; ++i)
+        out.values[i] = lhs.values[i] + rhs.values[i];
+}
+
+template <typename ValueT, int Dim>
+TENSOR_INLINE void mul_tensor(const Tensor<ValueT, Dim> &lhs,
+                              const Tensor<ValueT, Dim> &rhs,
+                              Tensor<ValueT, Dim> &out)
+{
+    TENSOR_PRAGMA_UNROLL
+    for (int i = 0; i < Dim; ++i)
+        out.values[i] = lhs.values[i] * rhs.values[i];
+}
+
+template <typename ValueT, int Dim>
+TENSOR_INLINE void sub_tensor(const Tensor<ValueT, Dim> &lhs,
+                              const Tensor<ValueT, Dim> &rhs,
+                              Tensor<ValueT, Dim> &out)
+{
+    TENSOR_PRAGMA_UNROLL
+    for (int i = 0; i < Dim; ++i)
+        out.values[i] = lhs.values[i] - rhs.values[i];
+}
+
+template <typename ValueT, int Dim>
+TENSOR_INLINE void div_tensor(const Tensor<ValueT, Dim> &lhs,
+                              const Tensor<ValueT, Dim> &rhs,
+                              Tensor<ValueT, Dim> &out)
+{
+    TENSOR_PRAGMA_UNROLL
+    for (int i = 0; i < Dim; ++i)
+        out.values[i] = lhs.values[i] / rhs.values[i];
+}
+
+template <typename ValueT, int Dim>
+TENSOR_INLINE void pow_tensor(const Tensor<ValueT, Dim> &lhs,
+                              const Tensor<ValueT, Dim> &rhs,
+                              Tensor<ValueT, Dim> &out)
+{
+    TENSOR_PRAGMA_UNROLL
+    for (int i = 0; i < Dim; ++i)
+        out.values[i] = lhs.values[i] ^ rhs.values[i];
+}
