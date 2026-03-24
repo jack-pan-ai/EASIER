@@ -76,7 +76,7 @@ void ApplyCarryOutFixup(int num_threads, int num_rows,
  * Apply carry-out fix-up for rows spanning multiple threads for aggregators
  */
 template <typename ValueT, typename OffsetT, int dim>
-void ApplyCarryOutFixup(int num_threads,
+void ApplyCarryOutFixupSum(int num_threads,
                         Tensor<ValueT, dim> *value_carry_out_sum,
                         ValueT *output_y_sum_ptr) {
   typedef Tensor<ValueT, dim> TensorOutput_sum_T;
@@ -88,6 +88,23 @@ void ApplyCarryOutFixup(int num_threads,
     output_y_sum_ptr[i] = sum_result.values[i];
   }
 }
+
+/**
+ * Apply carry-out fix-up for rows spanning multiple threads for aggregators
+ */
+ template <typename ValueT, typename OffsetT, int dim>
+ void ApplyCarryOutFixupNorm(int num_threads,
+                         Tensor<ValueT, dim> *value_carry_out_norm,
+                         ValueT *output_y_norm_ptr) {
+   typedef Tensor<ValueT, dim> TensorOutput_norm_T;
+   TensorOutput_norm_T norm_result;
+   for (int tid = 0; tid < num_threads; ++tid) {
+    norm_result += value_carry_out_norm[tid];
+   }
+   for (int i = 0; i < dim; i++) {
+     output_y_norm_ptr[i] = sqrt(norm_result.values[i]);
+   }
+ }
 
 /**
  * OpenMP CPU merge-based SpMV from CUB

@@ -76,7 +76,7 @@ void ApplyCarryOutFixup(int num_threads, int num_rows,
  * Apply carry-out fix-up for rows spanning multiple threads for aggregators
  */
 template <typename ValueT, typename OffsetT, int dim>
-void ApplyCarryOutFixup(int num_threads,
+void ApplyCarryOutFixupSum(int num_threads,
                         Tensor<ValueT, dim> *value_carry_out_sum,
                         ValueT *output_y_sum_ptr) {
   typedef Tensor<ValueT, dim> TensorOutput_sum_T;
@@ -90,55 +90,54 @@ void ApplyCarryOutFixup(int num_threads,
 }
 
 /**
+ * Apply carry-out fix-up for rows spanning multiple threads for aggregators
+ */
+ template <typename ValueT, typename OffsetT, int dim>
+ void ApplyCarryOutFixupNorm(int num_threads,
+                         Tensor<ValueT, dim> *value_carry_out_norm,
+                         ValueT *output_y_norm_ptr) {
+   typedef Tensor<ValueT, dim> TensorOutput_norm_T;
+   TensorOutput_norm_T norm_result;
+   for (int tid = 0; tid < num_threads; ++tid) {
+    norm_result += value_carry_out_norm[tid];
+   }
+   for (int i = 0; i < dim; i++) {
+     output_y_norm_ptr[i] = sqrt(norm_result.values[i]);
+   }
+ }
+
+/**
  * OpenMP CPU merge-based SpMV from CUB
  */
 template <typename ValueT, typename OffsetT>
 void OmpMergeSystem(
     int num_threads,
     // [code generation]
-      ValueT *__restrict points_ptr, 
-  ValueT *__restrict truediv_5_ptr, 
-  ValueT *__restrict bsx_ptr, 
-  ValueT *__restrict bsy_ptr, 
-  OffsetT *__restrict selector_bp_0_ptr, 
-  OffsetT *__restrict selector_bp_1_ptr, 
-  OffsetT *__restrict bselector_ptr, 
+      ValueT *__restrict truediv_3_ptr, 
+  ValueT *__restrict truediv_8_ptr, 
+  ValueT *__restrict truediv_13_ptr, 
+  ValueT *__restrict scatter_10_ptr, 
+  ValueT *__restrict scatter_b_6_ptr, 
+  ValueT *__restrict area_ptr, 
+  ValueT *__restrict uh_ptr, 
  int num_rows, int num_nonzeros) {
   // [code generation]
   // input and output tensors types
-    typedef Tensor<ValueT, 2> TensorInput_points_T; 
-  typedef Tensor<ValueT, 2> TensorInput_truediv_5_T; 
-  typedef Tensor<ValueT, 1> TensorInput_bsx_T; 
-  typedef Tensor<ValueT, 1> TensorInput_bsy_T; 
-   typedef Tensor<ValueT, 1> TensorOutput_getitem_68_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_clone_68_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_getitem_69_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_clone_69_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_getitem_70_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_clone_70_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_getitem_71_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_clone_71_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_getitem_72_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_clone_72_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_getitem_73_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_clone_73_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_sub_71_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_sub_72_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_mul_48_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_sub_73_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_sub_74_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_mul_49_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_sub_75_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_sign_6_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_sub_76_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_mul_50_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_neg_6_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_sub_77_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_mul_51_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_neg_7_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_setitem_13_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_neg_8_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_setitem_14_T; 
+    typedef Tensor<ValueT, 1> TensorInput_truediv_3_T; 
+  typedef Tensor<ValueT, 1> TensorInput_truediv_8_T; 
+  typedef Tensor<ValueT, 1> TensorInput_truediv_13_T; 
+  typedef Tensor<ValueT, 1> TensorInput_scatter_10_T; 
+  typedef Tensor<ValueT, 1> TensorInput_scatter_b_6_T; 
+  typedef Tensor<ValueT, 1> TensorInput_area_T; 
+  typedef Tensor<ValueT, 1> TensorInput_uh_T; 
+   typedef Tensor<ValueT, 1> TensorOutput_add_45_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_neg_10_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_truediv_18_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_add_52_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_add_53_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_add_54_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_86_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_add__1_T; 
   
 
 #pragma omp parallel for schedule(static) num_threads(num_threads)
@@ -162,59 +161,27 @@ void OmpMergeSystem(
     
     for (; thread_coord.y < thread_coord_end.y; ++thread_coord.y) {
       // selector
-        TensorInput_bsx_T bsx(bsx_ptr +                     thread_coord.y * 1); 
-  TensorInput_bsy_T bsy(bsy_ptr +                     thread_coord.y * 1); 
-  OffsetT column_indices_selector_bp_0 = selector_bp_0_ptr[thread_coord.y]; 
-  TensorInput_points_T selector_bp_0(points_ptr +                     column_indices_selector_bp_0 * 2); 
-  OffsetT column_indices_selector_bp_1 = selector_bp_1_ptr[thread_coord.y]; 
-  TensorInput_points_T selector_bp_1(points_ptr +                     column_indices_selector_bp_1 * 2); 
-  OffsetT column_indices_bselector = bselector_ptr[thread_coord.y]; 
-  TensorInput_truediv_5_T bselector(truediv_5_ptr +                     column_indices_bselector * 2); 
+        TensorInput_truediv_3_T truediv_3(truediv_3_ptr +                         thread_coord.y * 1); 
+  TensorInput_truediv_8_T truediv_8(truediv_8_ptr +                         thread_coord.y * 1); 
+  TensorInput_truediv_13_T truediv_13(truediv_13_ptr +                         thread_coord.y * 1); 
+  TensorInput_scatter_10_T scatter_10(scatter_10_ptr +                         thread_coord.y * 1); 
+  TensorInput_scatter_b_6_T scatter_b_6(scatter_b_6_ptr +                         thread_coord.y * 1); 
+  TensorInput_area_T area(area_ptr +                         thread_coord.y * 1); 
+  TensorInput_uh_T uh(uh_ptr +                         thread_coord.y * 1); 
 
 
       // mapping
-          TensorOutput_getitem_68_T                         getitem_68(bselector.values[0]); 
-    TensorOutput_clone_68_T clone_68(getitem_68); 
-    TensorOutput_getitem_69_T                         getitem_69(bselector.values[1]); 
-    TensorOutput_clone_69_T clone_69(getitem_69); 
-    TensorOutput_getitem_70_T                         getitem_70(selector_bp_0.values[0]); 
-    TensorOutput_clone_70_T clone_70(getitem_70); 
-    TensorOutput_getitem_71_T                         getitem_71(selector_bp_0.values[1]); 
-    TensorOutput_clone_71_T clone_71(getitem_71); 
-    TensorOutput_getitem_72_T                         getitem_72(selector_bp_1.values[0]); 
-    TensorOutput_clone_72_T clone_72(getitem_72); 
-    TensorOutput_getitem_73_T                         getitem_73(selector_bp_1.values[1]); 
-    TensorOutput_clone_73_T clone_73(getitem_73); 
-    TensorOutput_sub_71_T sub_71 =                 clone_70 - clone_72; 
-    TensorOutput_sub_72_T sub_72 =                 clone_69 - clone_73; 
-    TensorOutput_mul_48_T mul_48 =                     sub_71 * sub_72; 
-    TensorOutput_sub_73_T sub_73 =                 clone_71 - clone_73; 
-    TensorOutput_sub_74_T sub_74 =                 clone_68 - clone_72; 
-    TensorOutput_mul_49_T mul_49 =                     sub_73 * sub_74; 
-    TensorOutput_sub_75_T sub_75 =                 mul_48 - mul_49; 
-    TensorOutput_sign_6_T sign_6 = sub_75.sign(); 
-    TensorOutput_sub_76_T sub_76 =                 clone_71 - clone_73; 
-    TensorOutput_mul_50_T mul_50 =                     sign_6 * sub_76; 
-    TensorOutput_neg_6_T neg_6 =                     -sign_6; 
-    TensorOutput_sub_77_T sub_77 =                 clone_70 - clone_72; 
-    TensorOutput_mul_51_T mul_51 =                     neg_6 * sub_77; 
-    TensorOutput_neg_7_T neg_7 =                     -mul_50; 
+          TensorOutput_add_45_T add_45 =                     scatter_10 + scatter_b_6; 
+    TensorOutput_neg_10_T neg_10 =                     -add_45; 
+    TensorOutput_truediv_18_T truediv_18 =                     neg_10 / area; 
+    TensorOutput_add_52_T add_52 =                     truediv_3 + truediv_8; 
+    TensorOutput_add_53_T add_53 =                     add_52 + truediv_13; 
+    TensorOutput_add_54_T add_54 =                     add_53 + truediv_18; 
+    TensorOutput_mul_86_T mul_86 =                     4.1666666666666665e-05 * add_54; 
+    uh +=                     mul_86; 
   for (int i = 0; i < 1; i++) 
   { 
-    bsx_ptr[thread_coord.y * 1 + i] = neg_7.values[i]; 
-  } 
-  for (int i = 0; i < 1; i++) 
-  { 
-    bsx.values[i] = neg_7.values[i];
-  } 
-    TensorOutput_neg_8_T neg_8 =                     -mul_51; 
-  for (int i = 0; i < 1; i++) 
-  { 
-    bsy_ptr[thread_coord.y * 1 + i] = neg_8.values[i]; 
-  } 
-  for (int i = 0; i < 1; i++) 
-  { 
-    bsy.values[i] = neg_8.values[i];
+    uh_ptr[thread_coord.y * 1 + i] = uh.values[i]; 
   } 
 
 

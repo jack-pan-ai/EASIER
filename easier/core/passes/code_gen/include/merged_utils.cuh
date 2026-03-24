@@ -16,7 +16,7 @@ struct TensorKey
     using Value = ValueT;
 
     OffsetT key;
-    ValueT  values[Dim];
+    ValueT  values[Dim] = {};
 
     // =====================================================================
     // Constructors & assignment – kept trivial / defaulted
@@ -279,11 +279,12 @@ template <
 struct FlexParams
 {
     // [code generation]
-      ValueT *scatter_6_ptr; 
+      ValueT *truediv_2_ptr; 
+  ValueT *truediv_7_ptr; 
+  ValueT *truediv_12_ptr; 
+  ValueT *scatter_9_ptr; 
   ValueT *area_ptr; 
   ValueT *h_ptr; 
-  ValueT *output_y_truediv_12_ptr; 
-  ValueT *output_y_add_36_ptr; 
 
     int num_rows;                ///< Number of rows of matrix <b>A</b>.
     int num_cols;                ///< Number of columns of matrix <b>A</b>.

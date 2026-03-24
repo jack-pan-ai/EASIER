@@ -114,8 +114,12 @@ def trace_graph(submodule, traced_model):
                 if op == 'call_function' and "setitem" in str(target):
                     name = args[0]
                     target = args[-1]
-                if op == 'call_function' and "sum" in str(target):
+                if op == 'call_function' and 'sum' in str(target):
+                    # aggregator
                     target = 'sum'
+                if op == 'call_function' and 'norm' in str(target):
+                    # aggregator
+                    target = 'norm'
                 outputs.append(
                     {
                         "op": op,
@@ -268,8 +272,6 @@ def trace_graph(submodule, traced_model):
                 target_name = 'mul'
             elif 'sub' in str(target):
                 target_name = 'sub'
-            elif 'norm' in str(target):
-                target_name = 'norm'
             elif 'squeeze' in str(target):
                 target_name = 'squeeze'
             elif 'truediv' in str(target):
@@ -277,6 +279,9 @@ def trace_graph(submodule, traced_model):
             elif 'sum' in str(target):
                 # aggregator
                 target_name = 'sum'
+            elif 'norm' in str(target):
+                # aggregator
+                target_name = 'norm'
             elif 'neg' in str(target):
                 target_name = 'neg'
             elif 'add_' in str(target):
@@ -345,9 +350,14 @@ def trace_graph(submodule, traced_model):
                 'shape_all': shape_all,
                 'args': [arg.name if hasattr(arg, 'name') else arg for arg in args]
             })
-        elif 'sum' in str(target):
+        elif op == 'call_function' and ('sum' in str(target) or 'norm' in str(target)):
             # 2) obtain the aggregator
-            op_name = 'sum'
+            if 'sum' in str(target):
+                op_name = 'sum'
+            elif 'norm' in str(target):
+                op_name = 'norm'
+            else:
+                raise ValueError(f"Operation {target} not supported")
             
             aggregator_operations.append({
                 'name': name,

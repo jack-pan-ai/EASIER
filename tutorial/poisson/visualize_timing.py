@@ -18,8 +18,8 @@ COLOR_TAICHI_SIMPLE = '#F28E2B'
 COLOR_TAICHI_FUSED = '#FFBE7D'
 
 # N_CPU and N_GPU values from easier_swe.sh
-N_CPU=[500, 1000, 1500, 2000, 2500, 3000]
-N_GPU=[500, 1000, 1500, 2000, 2500, 3000]
+N_CPU=[1000, 2000, 3000, 4000, 5000]
+N_GPU=[1000, 2000, 3000, 4000, 5000]
 # Small helper: load timing CSVs (expects an `ms_per_iteration` column)
 def _load_seconds(path: str, *, required: bool):
     if not os.path.exists(path):
@@ -33,20 +33,20 @@ def _load_seconds(path: str, *, required: bool):
 
 # Read CSV files
 script_dir = os.path.dirname(os.path.abspath(__file__))
-res_dir = os.path.join(os.path.dirname(os.path.dirname(script_dir)), 'res')
+res_dir = os.path.join(os.path.dirname(os.path.dirname(script_dir)), 'res/poisson')
 
-cpu_cpu_file = os.path.join(res_dir, 'timing_cpu_cpu.csv')
-cpu_torch_file = os.path.join(res_dir, 'timing_cpu_torch.csv')
-cuda_cuda_file = os.path.join(res_dir, 'timing_cuda_cuda.csv')
-cuda_torch_file = os.path.join(res_dir, 'timing_cuda_torch.csv')
-kokkos_cpu_file = os.path.join(res_dir, 'swe_profile_cpu_simple/timing.csv')
-kokkos_gpu_file = os.path.join(res_dir, 'swe_profile_cuda/timing.csv')
-kokkos_cpu_fused_file = os.path.join(res_dir, 'swe_profile_cpu_fused/timing_fused.csv')
-kokkos_gpu_fused_file = os.path.join(res_dir, 'swe_profile_cuda_fused/timing_fused.csv')
-taichi_cpu_file = os.path.join(res_dir, 'res_simple/timing_cpu_taichi.csv')
-taichi_gpu_file = os.path.join(res_dir, 'res_simple/timing_cuda_taichi.csv')
-taichi_cpu_fused_file = os.path.join(res_dir, 'res_fused/timing_cpu_taichi_fused.csv')
-taichi_gpu_fused_file = os.path.join(res_dir, 'res_fused/timing_cuda_taichi_fused.csv')
+cpu_cpu_file = os.path.join(res_dir, 'timing_poisson_cpu_cpu.csv')
+cpu_torch_file = os.path.join(res_dir, 'timing_poisson_cpu_torch.csv')
+cuda_cuda_file = os.path.join(res_dir, 'timing_poisson_cuda_cuda.csv')
+cuda_torch_file = os.path.join(res_dir, 'timing_poisson_cuda_torch.csv')
+kokkos_cpu_file = os.path.join(res_dir, 'profile_poisson_cpu_simple/timing.csv')
+kokkos_gpu_file = os.path.join(res_dir, 'profile_poisson_cuda_simple/timing.csv')
+kokkos_cpu_fused_file = os.path.join(res_dir, 'profile_poisson_cpu_fused/timing_fused.csv')
+kokkos_gpu_fused_file = os.path.join(res_dir, 'profile_poisson_cuda_fused/timing_fused.csv')
+taichi_cpu_file = os.path.join(res_dir, 'profile_cpu/timing_cpu_taichi.csv')
+taichi_gpu_file = os.path.join(res_dir, 'profile_cuda/timing_cuda_taichi.csv')
+taichi_cpu_fused_file = os.path.join(res_dir, 'profile_cpu/timing_cpu_taichi_fused.csv')
+taichi_gpu_fused_file = os.path.join(res_dir, 'profile_cuda/timing_cuda_taichi_fused.csv')
 
 # Load + extract time data (seconds column)
 # Only use rows that have data (exclude header and empty rows)
@@ -165,6 +165,18 @@ if speedup_kokkos_cpu is not None:
         #          ha='center', va='bottom', fontsize=9, color=COLOR_KOKKOS_SIMPLE, fontweight='bold')
     bar_offset_cpu += bar_width_cpu
 
+if speedup_kokkos_cpu_fused is not None:
+    bars_kokkos_fused = ax1.bar([
+        x + bar_offset_cpu for x in n_cpu_data], speedup_kokkos_cpu_fused, width=bar_width_cpu,
+        alpha=0.7, color=COLOR_KOKKOS_FUSED,
+        edgecolor='black', linewidth=1.2, label='Speedup (Kokkos Fused/Easier)')
+    for bar in bars_kokkos_fused:
+        height = bar.get_height()
+        # ax1.text(bar.get_x() + bar.get_width()/2., height + text_offset,
+        #          f'{height:.2f}x',
+        #          ha='center', va='bottom', fontsize=9, color=COLOR_KOKKOS_FUSED, fontweight='bold')
+    bar_offset_cpu += bar_width_cpu
+
 if speedup_taichi_cpu is not None:
     bars_taichi = ax1.bar(
         [x + bar_offset_cpu for x in n_cpu_data], speedup_taichi_cpu, width=bar_width_cpu,
@@ -177,17 +189,6 @@ if speedup_taichi_cpu is not None:
     #              ha='center', va='bottom', fontsize=9, color=COLOR_TAICHI_SIMPLE, fontweight='bold')
     bar_offset_cpu += bar_width_cpu
 
-if speedup_kokkos_cpu_fused is not None:
-    bars_kokkos_fused = ax1.bar([
-        x + bar_offset_cpu for x in n_cpu_data], speedup_kokkos_cpu_fused, width=bar_width_cpu,
-        alpha=0.7, color=COLOR_KOKKOS_FUSED,
-        edgecolor='black', linewidth=1.2, label='Speedup (Kokkos Fused/Easier)')
-    for bar in bars_kokkos_fused:
-        height = bar.get_height()
-        # ax1.text(bar.get_x() + bar.get_width()/2., height + text_offset,
-        #          f'{height:.2f}x',
-        #          ha='center', va='bottom', fontsize=9, color=COLOR_KOKKOS_FUSED, fontweight='bold')
-    bar_offset_cpu += bar_width_cpu
 
 if speedup_taichi_cpu_fused is not None:
     bars_taichi_fused = ax1.bar(
@@ -223,17 +224,18 @@ if kokkos_cpu_times is not None:
                      color=COLOR_KOKKOS_SIMPLE, linewidth=2, markersize=8, alpha=0.7,
                      markerfacecolor=COLOR_KOKKOS_SIMPLE, markeredgecolor=COLOR_KOKKOS_SIMPLE, label='Kokkos')
 
+# Plot Kokkos fused time if available
+if kokkos_cpu_fused_times is not None:
+    line3_fused = ax2.plot(n_cpu_data, kokkos_cpu_fused_times, marker='v', linestyle='-.',
+                           color=COLOR_KOKKOS_FUSED, linewidth=2, markersize=8, alpha=0.7,
+                           markerfacecolor=COLOR_KOKKOS_FUSED, markeredgecolor=COLOR_KOKKOS_FUSED, label='Kokkos Fused')
+
 # Plot Taichi time if available
 if taichi_cpu_times is not None:
     line4 = ax2.plot(n_cpu_data, taichi_cpu_times, marker='D', linestyle=':',
                      color=COLOR_TAICHI_SIMPLE, linewidth=2, markersize=7, alpha=0.7,
                      markerfacecolor=COLOR_TAICHI_SIMPLE, markeredgecolor=COLOR_TAICHI_SIMPLE, label='Taichi')
 
-# Plot Kokkos fused time if available
-if kokkos_cpu_fused_times is not None:
-    line3_fused = ax2.plot(n_cpu_data, kokkos_cpu_fused_times, marker='v', linestyle='-.',
-                           color=COLOR_KOKKOS_FUSED, linewidth=2, markersize=8, alpha=0.7,
-                           markerfacecolor=COLOR_KOKKOS_FUSED, markeredgecolor=COLOR_KOKKOS_FUSED, label='Kokkos Fused')
 
 # Plot Taichi fused time if available
 if taichi_cpu_fused_times is not None:
@@ -309,17 +311,6 @@ if speedup_kokkos_gpu is not None:
     #                  ha='center', va='bottom', fontsize=12, color=COLOR_KOKKOS_SIMPLE, fontweight='bold')
     bar_offset_gpu += bar_width_gpu
 
-if speedup_taichi_gpu is not None:
-    bars_taichi_gpu = ax1_gpu.bar(
-        [x + bar_offset_gpu for x in n_gpu_data], speedup_taichi_gpu, width=bar_width_gpu,
-        alpha=0.7, color=COLOR_TAICHI_SIMPLE,
-        edgecolor='black', linewidth=1.2, label='Speedup (Taichi/Easier)')
-    # for bar in bars_taichi_gpu:
-    #     height = bar.get_height()
-    #     ax1_gpu.text(bar.get_x() + bar.get_width()/2., height + text_offset_gpu,
-    #                  f'{height:.2f}x',
-    #                  ha='center', va='bottom', fontsize=12, color=COLOR_TAICHI_SIMPLE, fontweight='bold')
-    bar_offset_gpu += bar_width_gpu
 
 if speedup_kokkos_gpu_fused is not None:
     bars_kokkos_gpu_fused = ax1_gpu.bar([
@@ -332,6 +323,19 @@ if speedup_kokkos_gpu_fused is not None:
         #              f'{height:.2f}x',
         #              ha='center', va='bottom', fontsize=12, color=COLOR_KOKKOS_FUSED, fontweight='bold')
     bar_offset_gpu += bar_width_gpu
+
+if speedup_taichi_gpu is not None:
+    bars_taichi_gpu = ax1_gpu.bar(
+        [x + bar_offset_gpu for x in n_gpu_data], speedup_taichi_gpu, width=bar_width_gpu,
+        alpha=0.7, color=COLOR_TAICHI_SIMPLE,
+        edgecolor='black', linewidth=1.2, label='Speedup (Taichi/Easier)')
+    # for bar in bars_taichi_gpu:
+    #     height = bar.get_height()
+    #     ax1_gpu.text(bar.get_x() + bar.get_width()/2., height + text_offset_gpu,
+    #                  f'{height:.2f}x',
+    #                  ha='center', va='bottom', fontsize=12, color=COLOR_TAICHI_SIMPLE, fontweight='bold')
+    bar_offset_gpu += bar_width_gpu
+
 
 if speedup_taichi_gpu_fused is not None:
     bars_taichi_gpu_fused = ax1_gpu.bar(
@@ -368,17 +372,19 @@ if kokkos_gpu_times is not None:
                              color=COLOR_KOKKOS_SIMPLE, linewidth=2, markersize=8, alpha=0.7,
                              markerfacecolor=COLOR_KOKKOS_SIMPLE, markeredgecolor=COLOR_KOKKOS_SIMPLE, label='Kokkos')
 
-# Plot Taichi time if available
-if taichi_gpu_times is not None:
-    line4_gpu = ax2_gpu.plot(n_gpu_data, taichi_gpu_times, marker='D', linestyle=':',
-                             color=COLOR_TAICHI_SIMPLE, linewidth=2, markersize=7, alpha=0.7,
-                             markerfacecolor=COLOR_TAICHI_SIMPLE, markeredgecolor=COLOR_TAICHI_SIMPLE, label='Taichi')
 
 # Plot Kokkos fused time if available
 if kokkos_gpu_fused_times is not None:
     line3_gpu_fused = ax2_gpu.plot(n_gpu_data, kokkos_gpu_fused_times, marker='v', linestyle='-.',
                                     color=COLOR_KOKKOS_FUSED, linewidth=2, markersize=8, alpha=0.7,
                                     markerfacecolor=COLOR_KOKKOS_FUSED, markeredgecolor=COLOR_KOKKOS_FUSED, label='Kokkos Fused')
+
+# Plot Taichi time if available
+if taichi_gpu_times is not None:
+    line4_gpu = ax2_gpu.plot(n_gpu_data, taichi_gpu_times, marker='D', linestyle=':',
+                             color=COLOR_TAICHI_SIMPLE, linewidth=2, markersize=7, alpha=0.7,
+                             markerfacecolor=COLOR_TAICHI_SIMPLE, markeredgecolor=COLOR_TAICHI_SIMPLE, label='Taichi')
+
 
 # Plot Taichi fused time if available
 if taichi_gpu_fused_times is not None:

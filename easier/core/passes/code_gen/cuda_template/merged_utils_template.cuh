@@ -16,7 +16,7 @@ struct TensorKey
     using Value = ValueT;
 
     OffsetT key;
-    ValueT  values[Dim];
+    ValueT  values[Dim] = {};
 
     // =====================================================================
     // Constructors & assignment – kept trivial / defaulted

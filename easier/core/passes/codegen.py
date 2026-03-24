@@ -352,7 +352,8 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
     and replace the submodules with dynamic wrappers that call the compiled kernels.
     """
     assert len(ms) == len(gs)
-
+    logger.info(f"{len(ms)} graphs have been processing")
+    
     # Collect build jobs across modules first (generation + snapshot)
     build_jobs: List[Tuple[str, str, str, str, object]] = []
     prebuilt_extensions: Dict[str, object] = {}
@@ -366,10 +367,11 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
             continue
 
         callmods = _collect_fused_call_modules(m, g)
-
+        # print(f"callmods: {callmods}")
         # Generate per submodule and snapshot immediately to avoid file clobbering
         for node_name, node, submod in callmods:
             logger.info(f"Node: {node_name}")
+            # check each submodule details for debugs 
             # submod.graph.print_tabular()
             cached_module = _load_cached_extension_module(backend, node_name)
             if cached_module is not None:

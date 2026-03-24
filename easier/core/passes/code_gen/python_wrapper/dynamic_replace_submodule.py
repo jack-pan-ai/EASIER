@@ -116,17 +116,18 @@ def _infer_gather_value_inputs(gm, selector_qnames: Iterable[str]) -> List[str]:
     return gather_inputs
 
 
-def _set_qualified_submodule(root: nn.Module, qualname: str, new_module: nn.Module) -> None:
-    """
-    Replace a submodule referenced by its qualified name on the given root module.
-    """
-    if "." in qualname:
-        parent_name, leaf_name = qualname.rsplit(".", 1)
-        parent = root.get_submodule(parent_name)
-    else:
-        parent = root
-        leaf_name = qualname
-    setattr(parent, leaf_name, new_module)
+# def _set_qualified_submodule(root: nn.Module, qualname: str, new_module: nn.Module) -> None:
+#     """
+#     Replace a submodule referenced by its qualified name on the given root module.
+#     """
+#     print(f"Setting qualified submodule {qualname} on {root}, new_module: {new_module}")
+#     if "." in qualname:
+#         parent_name, leaf_name = qualname.rsplit(".", 1)
+#         parent = root.get_submodule(parent_name)
+#     else:
+#         parent = root
+#         leaf_name = qualname
+#     setattr(parent, leaf_name, new_module)
 
 
 class _DynamicCudaWrapper(nn.Module):
@@ -197,17 +198,36 @@ class _DynamicCudaWrapper(nn.Module):
                 self.register_buffer(buf_name, gi, persistent=False)
             gi_list.append(gi)
 
-        # Determine gather source for num_cols
-        if len(self._gather_value_inputs) > 0:
-            gv_name = self._gather_value_inputs[0]
-        else:
-            gv_name = self._non_gather_value_inputs[0]
-        num_cols = int(arg_map[gv_name].shape[0])
+        # # Determine gather source for num_cols
+        # if len(self._gather_value_inputs) > 0:
+        #     gv_name = self._gather_value_inputs[0]
+        # else:
+        #     gv_name = self._non_gather_value_inputs[0]
+        
+        # num_cols = int(arg_map[gv_name].shape[0])
+        # val = arg_map[gv_name]
+        # if val.dim()== 0: 
+        #     num_cols = 1
+        # else:
+        #     num_cols = int(val.shape[0])
 
+        # Handle the case where arg map[gv name]is a scalar(0-dim tensor
+        def _infer_cols_from_inputs(inputs: List[str], arg_map: Dict[str, torch.Tensor]) -> int:
+            for input in inputs:
+                val = arg_map[input]
+                if val.dim() == 0:
+                    continue
+                else:
+                    if val.shape[0] == 1:
+                        continue
+                    else:
+                        return int(val.shape[0])
+
+        num_cols = _infer_cols_from_inputs(self._non_gather_value_inputs, arg_map)
         if self.row_end_offsets is not None:
             num_rows = int(ro.numel() - 1)
         else:
-            # map only, this is fake num_rows
+            # map only, this is fake num_rows (not necessarily) 
             num_rows = num_cols
 
         call_args: List[torch.Tensor] = []
@@ -303,10 +323,10 @@ def dynamic_replace_submodule(
         )
 
         # Replace the submodule on the owning module using the qualified target path
-        # setattr(jit_graph, submodule_name, wrapper)
-        _set_qualified_submodule(submodule, node.target, wrapper)
+        setattr(submodule, node.target, wrapper)
+        # _set_qualified_submodule(submodule, node.target, wrapper)
+
         return True
 
     return False
-
 

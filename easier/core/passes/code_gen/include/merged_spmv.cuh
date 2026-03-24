@@ -4,6 +4,7 @@
 #pragma once
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
+#include <math.h>
 
 #include "merged_utils.cuh"
 #include "merged_policy.cuh"
@@ -20,13 +21,15 @@ namespace merged
         typename ValueT,
         typename OffsetT,
         typename SpmvSearchKernelT,
-        typename SpmvKernelT>
+        typename SpmvKernelT,
+        typename SqrtTensorKernelT>
     __host__ __forceinline__ static cudaError_t merged_spmv_dispatch(
         FlexParams<ValueT, OffsetT> spmv_params,  ///< SpMV input parameter bundle
         void *d_temp_storage,                     ///< [in] Pointer to the device-accessible allocation of temporary storage
         size_t &temp_storage_bytes,               ///< [in,out] Reference to size in bytes of d_temp_storage allocations
         SpmvSearchKernelT spmv_search_kernel,     ///< [in] Kernel function pointer to parameterization of AgentSpmvSearchKernel
         SpmvKernelT spmv_kernel,                  ///< [in] Kernel function pointer to parameterization of AgentSpmvKernel
+        SqrtTensorKernelT sqrt_tensor_kernel,     ///< [in] Kernel function pointer to parameterization of SqrtTensorKernel
         LaunchKernelConfig spmv_config,           ///< [in] Dispatch parameters that match the policy that \p spmv_kernel was compiled for
         bool debug_synchronous = false,           ///< [in] Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
         cudaStream_t stream = 0)                  ///< [in] CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
@@ -106,6 +109,14 @@ namespace merged
                 spmv_params, d_tile_coordinates, 
                 num_merge_tiles
             );
+            
+            // aggregator norm after x1^2 + x2^2 + ... + xn^2 for sqrt
+            // sqrt_tensor_kernel<<<1, 1, 0, stream>>>(
+            //     spmv_params.output_y_sum_7_ptr,
+            //     1
+            // );
+            
+
 
             // Check for failure to launch
             if (CubDebug(error = cudaPeekAtLastError()))
@@ -147,6 +158,7 @@ namespace merged
             error = merged_spmv_dispatch(spmv_params, d_temp_storage, temp_storage_bytes,
                                          SpmvSearchKernel<PtxSpmvPolicyT, OffsetT, CoordinateT, SpmvParamsT>,
                                          SpmvKernel<PtxSpmvPolicyT, ValueT, OffsetT, CoordinateT, SpmvParamsT>,
+                                         SqrtTensorKernel<ValueT>,
                                          spmv_config,
                                          debug_synchronous, stream);
 

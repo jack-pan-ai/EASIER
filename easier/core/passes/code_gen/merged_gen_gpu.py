@@ -110,9 +110,10 @@ def generate_cuda_code_from_graph(submodule, traced_model):
                 f"               SmemReuseReducer<{_dim}, \
                     BlockScan_{out_name}_T> smem_{out_name}; \n")
         elif 'sum' in str(out['target']):
+            # aggregator
             _name = out_name
             output_agent_tenosrs_code.append(
-                f"  // Tensor type and block reducefor output \n")
+                f"  // Tensor type and block reduce for output \n")
             output_agent_tenosrs_code.append(
                 f"  typedef Tensor<ValueT, {_dim}> TensorOutput_{_name}_T; \n")
             output_agent_tenosrs_code.append(f"  typedef BlockReduce< \n")
@@ -126,14 +127,30 @@ def generate_cuda_code_from_graph(submodule, traced_model):
             output_agent_SMEM_code.append(
                 f"               typename BlockReduce_{_name}_T::TempStorage smem_{_name}; \n")
         elif 'norm' in str(out['target']):
-            # norm is special case that it is not a tensor, but a value
-            output_agent_forloop_code.append(
-                f"  for (int i = 0; i < {_dim}; i++) \n")
-            output_agent_forloop_code.append(f"  {{ \n")
-            output_agent_forloop_code.append(
-                f"    spmv_params.output_y_{out_name}_ptr[(tile_start_coord.y + nonzero_idx) \
-                    * {_dim} + i] = {out_name}; \n")
-            output_agent_forloop_code.append(f"  }} \n")
+            # aggregator
+            # # norm is special case that it is not a tensor, but a value
+            # output_agent_forloop_code.append(
+            #     f"  for (int i = 0; i < {_dim}; i++) \n")
+            # output_agent_forloop_code.append(f"  {{ \n")
+            # output_agent_forloop_code.append(
+            #     f"    spmv_params.output_y_{out_name}_ptr[(tile_start_coord.y + nonzero_idx) \
+            #         * {_dim} + i] = {out_name}; \n")
+            # output_agent_forloop_code.append(f"  }} \n")
+            _name = out_name
+            output_agent_tenosrs_code.append(
+                f"  // Tensor type and block reduce for output \n")
+            output_agent_tenosrs_code.append(
+                f"  typedef Tensor<ValueT, {_dim}> TensorOutput_{_name}_T; \n")
+            output_agent_tenosrs_code.append(f"  typedef BlockReduce< \n")
+            output_agent_tenosrs_code.append(
+                f"            TensorOutput_{_name}_T, \n")
+            output_agent_tenosrs_code.append(f"            BLOCK_THREADS, \n")
+            output_agent_tenosrs_code.append(
+                f"            BLOCK_REDUCE_WARP_REDUCTIONS> \n")
+            output_agent_tenosrs_code.append(
+                f"            BlockReduce_{_name}_T; \n")
+            output_agent_SMEM_code.append(
+                f"               typename BlockReduce_{_name}_T::TempStorage smem_{_name}; \n")
         else:
             # map inside the forloop
             output_agent_forloop_code.append(f"  #pragma unroll \n")
@@ -170,6 +187,8 @@ def generate_cuda_code_from_graph(submodule, traced_model):
         _name = inter['name']
         _target = inter['target'] # target is the args[0]
         _selector_name = inter['selector_name'] # selector_name is the target
+        _shape_ahead = inter['shape_ahead']
+        _shape_all = inter['shape_all']
         if inter['selector'] == 1:
             # load the selector register
             current = f"{_name}_ptr_current"
@@ -181,12 +200,22 @@ def generate_cuda_code_from_graph(submodule, traced_model):
                     {_name}({_target}_ptr + *{current} * {_dim}); \n")
         else:
             # spm loading
-            current = f"{_name}_ptr_current"
-            selector_code.append(
-                f"    VectorValueIteratorT {current} = {_selector_name}_ptr + \
-                    (tile_start_coord.y + nonzero_idx) * {_dim}; \n")
-            selector_code.append(
-                f"    TensorInput_{_target}_T {_selector_name}({_target}_ptr_current); \n")
+            
+            if _shape_ahead > 1:
+                # for vector
+                current = f"{_name}_ptr_current"
+                selector_code.append(
+                    f"    VectorValueIteratorT {current} = {_selector_name}_ptr + \
+                        (tile_start_coord.y + nonzero_idx) * {_dim}; \n")
+                selector_code.append(
+                    f"    TensorInput_{_target}_T {_selector_name}({_target}_ptr_current); \n")
+            else: 
+                # for scalar
+                current = f"{_name}_ptr_current"
+                selector_code.append(
+                    f"    VectorValueIteratorT {current} = {_selector_name}_ptr; \n")
+                selector_code.append(
+                    f"    TensorInput_{_target}_T {_selector_name}({_target}_ptr_current); \n")
 
     # debug print
     # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
@@ -202,7 +231,7 @@ def generate_cuda_code_from_graph(submodule, traced_model):
         _dim = get_dim_length(op['shape'])
 
         # add the declarations for the map agent tenosrs
-        if _op != 'reducer' and 'sum' not in _op:
+        if _op != 'reducer' and 'sum' not in _op and 'norm' not in _op:
             map_agent_tenosrs_code.append(
                 f"  typedef Tensor<ValueT, {_dim}> TensorOutput_{_name}_T; \n")
 
@@ -301,15 +330,19 @@ def generate_cuda_code_from_graph(submodule, traced_model):
             map_code.append(f"  {{ \n")
             map_code.append(f"    {op['args'][0]}.values[i] = {op['args'][2]}.values[i];\n")
             map_code.append(f"  }} \n")
-        elif _op == 'norm':
-            map_code.append(
-                f"    ValueT {_name} = {op['args'][0]}.l2Norm(); \n")
         elif _op == 'reducer':
             map_code.append(
                 f"    temp_storage.smem_{_name}.s_tile_value_reducer[nonzero_idx] = \
                     {op['args'][0]}; \n")
         elif _op == 'sum':
-            map_code.append(f"    {_name} = {_name} + {op['args'][0]}; \n")
+            # aggregator
+            # map_code.append(f"    {_name} = {_name} + {op['args'][0]}; \n")
+            map_code.append(f"    {_name} = {op['args'][0]}; \n")
+        elif _op == 'norm':
+            # map_code.append(
+            #     f"    ValueT {_name} = {op['args'][0]}.l2Norm(); \n")
+            # aggregator
+            map_code.append(f"    {_name} = {op['args'][0]} * {op['args'][0]}; \n")
         elif _op == 'abs':
             map_code.append(
                 f"    TensorOutput_{_name}_T {_name} = {op['args'][0]}.abs(); \n")
@@ -340,6 +373,7 @@ def generate_cuda_code_from_graph(submodule, traced_model):
     # Generate the aggregator code
     aggregator_code = []
     aggregator_reg_definitions = []
+    aggregator_norm_code_sqrt_after_reduction_code = []
 
     for op in aggregator_operations:
         _name = op['name']
@@ -363,6 +397,32 @@ def generate_cuda_code_from_graph(submodule, traced_model):
                     {_name}_result.values[i]); \n")
             aggregator_code.append(f"     }} \n")
             aggregator_code.append(f"   }} \n")
+        elif op['op'] == 'norm':
+            aggregator_code.append(f"   // blockReduce \n")
+            aggregator_code.append(
+                f"   TensorOutput_{_name}_T {_name}_result = \
+                    BlockReduce_{_name}_T(temp_storage.smem_{_name}).Sum({_name}); \n")
+            aggregator_code.append(f"   if (threadIdx.x == 0) \n")
+            aggregator_code.append(f"   {{ \n")
+            aggregator_code.append(f"     #pragma unroll \n")
+            aggregator_code.append(f"     for (int i = 0; i < {_dim}; i++) \n")
+            aggregator_code.append(f"     {{ \n")
+            aggregator_code.append(
+                f"       atomicAdd(&spmv_params.output_y_{_name}_ptr[i], \
+                    {_name}_result.values[i]); \n")
+            aggregator_code.append(f"     }} \n")
+            aggregator_code.append(f"   }} \n")
+            # add sqrt operation
+            aggregator_norm_code_sqrt_after_reduction_code.append(
+                f"   sqrt_tensor_kernel<<<1, 1, 0, stream>>>( \n")
+            aggregator_norm_code_sqrt_after_reduction_code.append(
+                f"     spmv_params.output_y_{_name}_ptr, \n")
+            aggregator_norm_code_sqrt_after_reduction_code.append(
+                f"     {_dim} \n")
+            aggregator_norm_code_sqrt_after_reduction_code.append(
+                f"   ); \n")
+        else:
+            raise ValueError(f"Operation {op['op']} not supported")
 
     # debug print
     # if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
@@ -370,6 +430,8 @@ def generate_cuda_code_from_graph(submodule, traced_model):
         logger.debug(f"Aggregator reg definitions: {op}")
     for op in aggregator_code:
         logger.debug(f"Aggregator code: {op}")
+    for op in aggregator_norm_code_sqrt_after_reduction_code:
+        logger.debug(f"Aggregator norm code sqrt after reduction code: {op}")
 
     # Generate the reducer code
     reducer_code = []
@@ -425,15 +487,30 @@ def generate_cuda_code_from_graph(submodule, traced_model):
     # Read template files
     # map only will use the aggregator template
     _folder = 'reducer' if reducer_operations != [] else 'aggregator'
-    template_agent_path = os.path.join(project_root, "cuda_template", _folder, "merged_agent_spmv_template.cuh")
+
+    template_agent_path = os.path.join(
+        project_root, 
+        "cuda_template", 
+        _folder, 
+        "merged_agent_spmv_template.cuh"
+    )
     with open(template_agent_path, "r") as f:
         kernel_agent_template = f.read()
 
-    template_utils_path = os.path.join(project_root, "cuda_template", "merged_utils_template.cuh")
+    template_utils_path = os.path.join(
+        project_root, 
+        "cuda_template", 
+        "merged_utils_template.cuh"
+    )
     with open(template_utils_path, "r") as f:
         utils_template = f.read()
 
-    template_spmv_path = os.path.join(project_root, "cuda_template", _folder, "merged_spmv_template.cuh")
+    template_spmv_path = os.path.join(
+        project_root, 
+        "cuda_template", 
+        _folder, 
+        "merged_spmv_template.cuh"
+    )
     with open(template_spmv_path, "r") as f:
         kernel_spmv_template = f.read()
 
@@ -452,10 +529,13 @@ def generate_cuda_code_from_graph(submodule, traced_model):
     reducer_code_str = trans_str(reducer_code)
     aggregator_reg_definitions_str = trans_str(aggregator_reg_definitions)
     aggregator_code_str = trans_str(aggregator_code)
+    aggregator_norm_code_sqrt_after_reduction_code_str = \
+        trans_str(aggregator_norm_code_sqrt_after_reduction_code)
     output_agent_tenosrs_code_str = trans_str(output_agent_tenosrs_code)
     output_agent_SMEM_code_str = trans_str(output_agent_SMEM_code)
     output_agent_forloop_code_str = trans_str(output_agent_forloop_code)
     map_agent_tenosrs_code_str = trans_str(map_agent_tenosrs_code)
+    input_declarations_utils_str = trans_str(input_declarations_utils_code)
 
     agent_kernel_code = string.Template(kernel_agent_template).substitute(
         input_declarations_code=input_declarations_str,
@@ -472,11 +552,11 @@ def generate_cuda_code_from_graph(submodule, traced_model):
         map_agent_tenosrs_code=map_agent_tenosrs_code_str,
     )
 
+    # norm aggregator
     spmv_kernel_code = string.Template(kernel_spmv_template).substitute(
+        aggregator_norm_code_sqrt_after_reduction=\
+            aggregator_norm_code_sqrt_after_reduction_code_str
     )
-
-    # Join the list of input declarations into a single string
-    input_declarations_utils_str = ''.join(input_declarations_utils_code)
 
     utils_code = string.Template(utils_template).substitute(
         input_declarations_utils_code=input_declarations_utils_str

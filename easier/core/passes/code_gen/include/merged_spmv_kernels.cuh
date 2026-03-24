@@ -126,4 +126,22 @@ namespace merged
 
         AgentFlexSpmvT(temp_storage, spmv_params).ConsumeTile(d_tile_coordinates, num_tiles);
     }
+
+    /**
+     * Elementwise sqrt for a dim-length tensor in global memory.
+     *
+     * Expects `d_in` and `d_out` to point to arrays of length `Dim`.
+     */
+     template <typename ValueT>
+     __global__ void SqrtTensorKernel(
+        ValueT* __restrict__ d_output,
+        int dim
+    )
+     {
+        if (threadIdx.x == 0 && blockIdx.x == 0) {
+            for (int i = 0; i < dim; i++) {
+                d_output[i] = sqrt(d_output[i]);
+            }
+        }
+    }
 }

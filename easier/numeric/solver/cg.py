@@ -107,7 +107,8 @@ class CG(esr.Module):
               rtol: float = 1e-5,
               atol: Optional[float] = None,
               maxiter: Optional[int] = None,
-              debug_iter: Optional[int] = None
+              debug_iter: Optional[int] = None,
+              profile: Optional[bool] = False
               ) -> Dict[str, Any]:
         name = self.__class__.__name__
         self.init()
@@ -124,7 +125,7 @@ class CG(esr.Module):
                     f" at the {iters}-th iteration")
 
             if (not torch.isnan(self.rnorm) and self.rnorm <= tol) or \
-               (maxiter is not None and iters >= maxiter):
+            (maxiter is not None and iters >= maxiter):
                 break
             iters += 1
 
@@ -133,5 +134,13 @@ class CG(esr.Module):
         esr.logger.info(
             f"{name} solver completed with residual {float(self.rnorm)}" +
             f" at the {iters}-th iteration")
-
         return {'residual': float(self.rnorm), 'iters': iters}
+    
+    def solve_profile(self,
+              maxiter: Optional[int] = None,
+              ) -> Dict[str, Any]:
+        self.init()
+
+        for _ in range(maxiter):
+            self.step()
+            self.update()

@@ -120,7 +120,8 @@ def generate_binding_code(
         out_name = o["name"]
         if str(o["target"]) == "reducer":
             add_output(out_name, dim, make_shape_expr("num_rows", dim), idx)
-        elif "sum" in str(o["target"]):
+        elif 'sum' in str(o["target"]) or 'norm' in str(o["target"]):
+            # aggregator
             add_output(out_name, dim, f"{dim}", idx)
         else:
             add_output(out_name, dim, make_shape_expr("ne", dim), idx)

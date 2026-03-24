@@ -13,18 +13,30 @@ import numpy as np
 import easier as esr
 
 def run_profile_timing(eqn, args):
+    # compilation
+    print("Compiling...")
+    eqn()
     # warmup
     num_warmup = 5 if args.device == 'cpu' else 50
+    # num_warmup = 0 if args.device == 'cpu' else 0
     print(f"Warming up {num_warmup} times")
     for _ in range(num_warmup):
         eqn()
-    num_times = 20 if args.device == 'cpu' else 100
+    # num_times = 20 if args.device == 'cpu' else 100
+    num_times = 1 if args.device == 'cpu' else 1
     print(f"Running {num_times} times")
     if args.device == 'cuda':
         torch.cuda.synchronize()
     start_time = time.perf_counter()
     for _ in range(num_times):
-        eqn()
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            record_shapes=True,
+            with_stack=True
+        ) as prof:
+            eqn()
+        prof.export_chrome_trace("trace-v1.json")
+        print(prof.key_averages().table(sort_by="cpu_time_total"))
     if args.device == 'cuda':
         torch.cuda.synchronize()
     end_time = time.perf_counter()

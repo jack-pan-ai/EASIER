@@ -84,18 +84,18 @@ def declarations_gen(
                 f" OffsetT row_carry_out_{_name}[256]; \n")
             output_agent_tenosrs_code.append(
                 f" TensorOutput_{_name}_T value_carry_out_{_name}[256]; \n")
-        elif 'sum' in str(out['target']):
-
+        elif 'sum' in str(out['target']) or 'norm' in str(out['target']):
+            # aggregator
             output_agent_tenosrs_code.append(
                 f"  typedef Tensor<ValueT, {_dim}> TensorOutput_{_name}_T; \n")
-        elif 'norm' in str(out['target']):
-            # norm is special case that it is not a tensor, but a value
-            output_agent_forloop_code.append(
-                f"  for (int i = 0; i < {_dim}; i++) \n")
-            output_agent_forloop_code.append(f"  {{ \n")
-            output_agent_forloop_code.append(
-                f"    output_y_{_name}_ptr[thread_coord.y * {_dim} + i] = {_name}; \n")
-            output_agent_forloop_code.append(f"  }} \n")
+        # elif 'norm' in str(out['target']):
+        #     # norm is special case that it is not a tensor, but a value
+        #     output_agent_forloop_code.append(
+        #         f"  for (int i = 0; i < {_dim}; i++) \n")
+        #     output_agent_forloop_code.append(f"  {{ \n")
+        #     output_agent_forloop_code.append(
+        #         f"    output_y_{_name}_ptr[thread_coord.y * {_dim} + i] = {_name}; \n")
+        #     output_agent_forloop_code.append(f"  }} \n")
         else:
             # map consume the main part
             output_agent_forloop_code.append(
@@ -113,6 +113,8 @@ def declarations_gen(
         _name = inter['name']
         _target = inter['target']
         _selector_name = inter['selector_name']
+        _shape_ahead = inter['shape_ahead']
+        _shape_all = inter['shape_all']
         if inter['selector'] == 1:
             # load the selector register
             column_indices = f"column_indices_{_name}"
@@ -124,11 +126,22 @@ def declarations_gen(
                 f"  TensorInput_{_target}_T {_name}({target_ptr} + \
                     {column_indices} * {_dim}); \n")
         else:
-            # spm loading
-            target_ptr = f"{_target}_ptr"
-            selector_code.append(
-                f"  TensorInput_{_target}_T {_selector_name}({target_ptr} + \
-                    thread_coord.y * {_dim}); \n")
+            # # spm loading
+            # target_ptr = f"{_target}_ptr"
+            # selector_code.append(
+            #     f"  TensorInput_{_target}_T {_selector_name}({target_ptr} + \
+            #         thread_coord.y * {_dim}); \n")
+            if _shape_ahead > 1:
+                # for vector
+                target_ptr = f"{_target}_ptr"
+                selector_code.append(
+                    f"  TensorInput_{_target}_T {_selector_name}({target_ptr} + \
+                        thread_coord.y * {_dim}); \n")
+            else: 
+                # for scalar
+                target_ptr = f"{_target}_ptr"
+                selector_code.append(
+                    f"  TensorInput_{_target}_T {_selector_name}({target_ptr}); \n")
 
     return input_parameters_code, input_agent_tenosrs_code, \
         output_agent_tenosrs_code, \
@@ -155,7 +168,7 @@ def map_gen(map_operations):
         _op = op['op']
         _dim = get_dim_length(op['shape'])
         # add the declarations for the map agent tenosrs
-        if _op != 'reducer' and 'sum' not in _op:
+        if _op != 'reducer' and ('sum' not in _op and 'norm' not in _op):
             map_agent_tenosrs_code.append(
                 f"  typedef Tensor<ValueT, {_dim}> TensorOutput_{_name}_T; \n")
 
@@ -185,7 +198,9 @@ def map_gen(map_operations):
                     -{op['args'][0]}; \n")
         elif _op == 'add_':
             map_code.append(
-                f"    {op['args'][0]} = {op['args'][0]} + \
+                # f"    {op['args'][0]} = {op['args'][0]} + \
+                #     {op['args'][1]}; \n")
+                f"    {op['args'][0]} += \
                     {op['args'][1]}; \n")
             map_code.append(f"  for (int i = 0; i < {_dim}; i++) \n")
             map_code.append(f"  {{ \n")
@@ -195,9 +210,6 @@ def map_gen(map_operations):
             map_code.append(
                 f"    TensorOutput_{_name}_T {_name} = \
                     {op['args'][0]}.exp(); \n")
-        elif _op == 'norm':
-            map_code.append(
-                f"    ValueT {_name} = {op['args'][0]}.l2Norm(); \n")
         elif _op == 'reducer':
             pass
         elif _op == 'getitem':
@@ -256,6 +268,12 @@ def map_gen(map_operations):
             map_code.append(f"    {_variable_name}.values[i] = {_value_name}.values[i];\n")
             map_code.append(f"  }} \n")
         elif _op == 'sum':
+            # aggregator
+            pass
+        elif _op == 'norm':
+            # aggregator
+            # map_code.append(
+            #     f"    ValueT {_name} = {op['args'][0]}.l2Norm(); \n")
             pass
         elif _op == 'abs':
             map_code.append(
@@ -311,13 +329,23 @@ def aggregator_gen(aggregator_operations):
     for op in aggregator_operations:
         _dim = get_dim_length(op['shape'])
         _name = op['name']
-        aggregator_partial_carry_fixup_code.append(
-            f"    ApplyCarryOutFixup<ValueT, OffsetT, {_dim}>(num_threads, \
-                {_name}_running_carry_out, output_y_{_name}_ptr); \n")
+        if 'sum' in _name:
+            aggregator_partial_carry_fixup_code.append(
+                f"    ApplyCarryOutFixupSum<ValueT, OffsetT, {_dim}>(num_threads, \
+                    {_name}_running_carry_out, output_y_{_name}_ptr); \n")
+            aggregator_partial_forloop_code.append(
+            f"    {_name}_running_carry_out[tid] += {op['args'][0]}; \n")
+        elif 'norm' in _name:
+            aggregator_partial_carry_fixup_code.append(
+                f"    ApplyCarryOutFixupNorm<ValueT, OffsetT, {_dim}>(num_threads, \
+                    {_name}_running_carry_out, output_y_{_name}_ptr); \n")
+            aggregator_partial_forloop_code.append(
+            f"    {_name}_running_carry_out[tid] += {op['args'][0]} * {op['args'][0]}; \n")
+        else:
+            raise ValueError(f"Operation {_name} not supported")
         aggregator_partial_carry_fixup_code.append(
             f"    delete[] {_name}_running_carry_out; \n")
-        aggregator_partial_forloop_code.append(
-            f"    {_name}_running_carry_out[tid] += {op['args'][0]}; \n")
+        
         aggregator_tenosrs_carry_out_code.append(
             f"    TensorOutput_{_name}_T* {_name}_running_carry_out=new \
                 TensorOutput_{_name}_T[num_threads]; \n")

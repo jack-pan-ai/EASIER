@@ -9,3 +9,6 @@ torch
 pymetis
 h5py
 networkx
+tabulate
+tqdm
+ninja

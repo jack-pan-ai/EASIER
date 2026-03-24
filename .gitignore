@@ -153,3 +153,13 @@ dmypy.json
 # temporary
 trash/
 tutorial/shallow_water_equation/*.pdf
+tutorial/shallow_water_equation/speedup_tables.tex
+easier/core/passes/code_gen/merged_binding.cu
+easier/core/passes/code_gen/merged_binding_cpu.cpp
+easier/core/passes/code_gen/merged_gen_binding.py
+easier/core/passes/code_gen/merged_gen_binding_cpu.py
+easier/core/passes/code_gen/merged_spmv.h
+tutorial/spmv/
+tutorial/shallow_water_equation/generate_speedup_table.py
+tutorial/shallow_water_equation/*.pdf
+tutorial/poisson/*.pdf
