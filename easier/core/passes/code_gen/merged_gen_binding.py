@@ -100,10 +100,13 @@ def generate_binding_code(
     output_tuple_returns_list = []
     params_output_ptrs = []
 
-    def add_output(out_name: str, dim: int, size_expr: str, idx: int):
+    def add_output(out_name: str, dim: int,size_expr: str, idx: int):
         var_name = f"out_{idx}_{out_name}"
+        # output_allocations.append(
+        #     f"  torch::Tensor {var_name} = torch::zeros({{{size_expr}}}, options_val);\n"
+        # )
         output_allocations.append(
-            f"  torch::Tensor {var_name} = torch::zeros({{{size_expr}}}, options_val);\n"
+            f"  torch::Tensor {var_name} = torch::empty({{{size_expr}}}, options_val);\n"
         )
         output_tuple_returns_list.append(var_name)
         params_output_ptrs.append(

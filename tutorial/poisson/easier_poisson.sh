@@ -6,9 +6,9 @@ export OMP_NUM_THREADS=${THREADS}
 export OMP_INTEROP_THREADS=${INTEROP_THREADS}
 
 # Problem sizes (same as shallow water example)
-N_CPU=(1000 2000 3000 4000 5000)
-N_GPU=(1000 2000 3000 4000 5000)
-# N_CPU=(500)
+# N_CPU=(1000 2000 3000 4000 5000)
+# N_GPU=(1000 2000 3000 4000 5000)
+N_CPU=(2000)
 # N_GPU=(500)
 
 mkdir -p res

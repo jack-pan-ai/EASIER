@@ -12,6 +12,31 @@ import numpy as np
 
 import easier as esr
 
+def c_profile_timing(eqn, args):
+    import cProfile
+    import time
+    prof = cProfile.Profile()
+    prof.enable()
+    start_time = time.time()
+    for _ in range(5):
+        eqn()
+    end_time = time.time()
+    avg_time = (end_time - start_time) / 5
+    avg_time_ms = avg_time * 1000
+    print(f"eqn() execution time: {avg_time_ms:.6f} ms")
+    prof.disable()
+    prof.dump_stats(f'res/profile-{args.dt}.prof')
+    # Save timing result to a CSV file with device, backend, and dt in the filename
+    csv_dir = args.output if args.output else "res"
+    os.makedirs(csv_dir, exist_ok=True)
+    csv_filename = os.path.join(csv_dir, f"timing_{args.device}_{args.backend}_res.csv")
+    write_header = not os.path.exists(csv_filename)
+    with open(csv_filename, "a", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        if write_header:
+            writer.writerow(["num_times", "avg_ms_per_iter"])
+        writer.writerow([5, f"{avg_time_ms:.6f}"])
+
 def run_profile_timing(eqn, args):
     # compilation
     print("Compiling...")
@@ -28,15 +53,20 @@ def run_profile_timing(eqn, args):
     if args.device == 'cuda':
         torch.cuda.synchronize()
     start_time = time.perf_counter()
-    for _ in range(num_times):
-        with torch.profiler.profile(
-            activities=[torch.profiler.ProfilerActivity.CPU],
-            record_shapes=True,
-            with_stack=True
-        ) as prof:
-            eqn()
-        prof.export_chrome_trace("trace-v1.json")
-        print(prof.key_averages().table(sort_by="cpu_time_total"))
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            # torch.profiler.ProfilerActivity.CUDA,
+        ],
+        record_shapes=True,
+        with_stack=True,
+        profile_memory=True,
+        with_modules=True,
+        with_flops=True,
+    ) as prof:
+        eqn()
+    print(prof.key_averages().table(sort_by="cpu_time_total"))
+    prof.export_chrome_trace("trace-cpu.json")
     if args.device == 'cuda':
         torch.cuda.synchronize()
     end_time = time.perf_counter()
@@ -263,3 +293,5 @@ if __name__ == "__main__":
         
     if args.profile:
         run_profile_timing(eqn, args)
+    
+    c_profile_timing(eqn, args)

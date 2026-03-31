@@ -96,9 +96,15 @@ def generate_cpu_binding_code(
 
     def add_output(out_name: str, dim: int, size_expr: str, idx: int):
         var_name = f"out_{idx}_{out_name}"
+        # Uninitialized buffer: OmpMergeSystem writes every output element (map
+        # per edge, reducer per row, aggregators in fixup). torch::zeros would
+        # call aten::fill_ on the full tensor and dominated CPU profiles.
         output_allocations.append(
-            f"  torch::Tensor {var_name} = torch::zeros({{{size_expr}}}, options_val);\n"
+            f"  torch::Tensor {var_name} = torch::empty({{{size_expr}}}, options_val);\n"
         )
+        # output_allocations.append(
+        #     f"  torch::Tensor {var_name} = torch::zeros({{{size_expr}}}, options_val);\n"
+        # )
         output_tuple_returns_list.append(var_name)
         output_ptrs.append(
             f"  auto* output_y_{out_name}_ptr = reinterpret_cast<ValueT*>({var_name}.data_ptr());\n"

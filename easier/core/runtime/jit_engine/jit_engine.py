@@ -1183,7 +1183,8 @@ class JitEngine:
         ms, gs = passes.fuse_dataflow(ms, gs)
         ms, gs = passes.analyze_life_range(ms, gs)
         # debug use
-        # gs[0].print_tabular()
+        gs[0].print_tabular()
+        # print("====no code generation=====")
         ms, gs = passes.code_generation(ms, gs)
 
         [self.module], [self.graph] = ms, gs
@@ -1205,10 +1206,16 @@ class JitEngine:
         if self.run_count == 0:
             handlers = self.create_first_run_handlers(stackframe)
         else:
+            # self.fake_gm()
+            # return 
             handlers = self.create_runtime_handlers(stackframe)
 
         for node in list(self.graph.nodes):
-            # args and kwargs collections are mutable for Handlers to modify.
+            # One profiler span per FX node so Chrome traces show continuous
+            # work under `forward` (native ATen time is attributed inside this
+            # span instead of looking like an empty gap).
+            # with torch.profiler.record_function(f"jit:node:{node.name}, target: {node.target}"):
+                # args and kwargs collections are mutable for Handlers to modify.
             args, kwargs = [], {}
 
             for i_handler, handler in enumerate(handlers):
@@ -1241,6 +1248,8 @@ class JitEngine:
 
         if self.run_count == 0:
             self.compile_after_first_run()
+            # from torch.fx import GraphModule
+            # self.fake_gm = GraphModule(self.module, self.graph)
 
         self.run_count += 1
 
