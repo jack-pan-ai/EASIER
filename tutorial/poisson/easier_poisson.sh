@@ -1,14 +1,18 @@
 #! /bin/bash
-export EASIER_DISABLE_JIT_HASH=1
-THREADS=20
-INTEROP_THREADS=1
-export OMP_NUM_THREADS=${THREADS}
-export OMP_INTEROP_THREADS=${INTEROP_THREADS}
+# if jit compile is too slow, comment this one;
+# this will save the cache and reuse it for next run.
+# export EASIER_DISABLE_JIT_HASH=1
+
+export OMP_NUM_THREADS=32
+export OMP_PLACES="{0:32}"
+export OMP_PROC_BIND=close
+export OMP_DISPLAY_ENV=verbose
+export OMP_DISPLAY_AFFINITY=TRUE
 
 # Problem sizes (same as shallow water example)
-# N_CPU=(1000 2000 3000 4000 5000)
-# N_GPU=(1000 2000 3000 4000 5000)
-N_CPU=(2000)
+N_CPU=(1000 2000 3000 4000 5000)
+N_GPU=(1000 2000 3000 4000 5000)
+# N_CPU=(2000)
 # N_GPU=(500)
 
 mkdir -p res
@@ -76,7 +80,7 @@ do
 
     # CPU Torch backend
     echo "  [CPU][torch backend] Profiling Poisson solve"
-    torchrun tutorial/poisson/poisson_profile.py \
+    torchrun --nproc_per_node=1 tutorial/poisson/poisson_profile.py \
         --solver=cg --profile=True --backend=torch \
         --maxiter=100 --atol=1e-10 --debug_iter=10 \
         --device=cpu --comm_backend=gloo --output=res/ \
@@ -85,7 +89,7 @@ do
 
     # CPU Easier JIT backend
     echo "  [CPU][jit backend] Profiling Poisson solve"
-    torchrun tutorial/poisson/poisson_profile.py \
+    torchrun --nproc_per_node=1 tutorial/poisson/poisson_profile.py \
         --solver=cg --profile=True --backend=cpu \
         --maxiter=100 --atol=1e-10 --debug_iter=10 \
         --device=cpu --comm_backend=gloo --output=res/ \

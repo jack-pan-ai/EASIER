@@ -37,36 +37,48 @@ def c_profile_timing(eqn, args):
             writer.writerow(["num_times", "avg_ms_per_iter"])
         writer.writerow([5, f"{avg_time_ms:.6f}"])
 
+def torch_profile(eqn, args):
+    # compilation
+    print("Compiling...")
+    eqn()
+    # warmup
+    num_warmup = 5 if args.device == 'cpu' else 50
+    print(f"Warming up {num_warmup} times")
+    for _ in range(num_warmup):
+        eqn()
+    num_times = 1 if args.device == 'cpu' else 1
+    print(f"Running {num_times} times")
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        # record_shapes=False,
+        with_stack=True,
+        # with_modules=False,
+        # with_flops=False,
+    ) as prof:
+        eqn()
+    print(prof.key_averages().table(sort_by="cpu_time_total"))
+    prof.export_chrome_trace(f"trace-{args.device}-{args.backend}.json")
+    
+
 def run_profile_timing(eqn, args):
     # compilation
     print("Compiling...")
     eqn()
     # warmup
     num_warmup = 5 if args.device == 'cpu' else 50
-    # num_warmup = 0 if args.device == 'cpu' else 0
     print(f"Warming up {num_warmup} times")
     for _ in range(num_warmup):
         eqn()
-    # num_times = 20 if args.device == 'cpu' else 100
-    num_times = 1 if args.device == 'cpu' else 1
+    num_times = 20 if args.device == 'cpu' else 100
     print(f"Running {num_times} times")
     if args.device == 'cuda':
         torch.cuda.synchronize()
     start_time = time.perf_counter()
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            # torch.profiler.ProfilerActivity.CUDA,
-        ],
-        record_shapes=True,
-        with_stack=True,
-        profile_memory=True,
-        with_modules=True,
-        with_flops=True,
-    ) as prof:
+    for _ in range(num_times):
         eqn()
-    print(prof.key_averages().table(sort_by="cpu_time_total"))
-    prof.export_chrome_trace("trace-cpu.json")
     if args.device == 'cuda':
         torch.cuda.synchronize()
     end_time = time.perf_counter()
@@ -86,7 +98,6 @@ def run_profile_timing(eqn, args):
             writer.writerow(["num_times", "seconds", "ms_per_iteration"])
         writer.writerow([num_times, f"{elapsed:.6f}", 
                          f"{elapsed/num_times*1000:.4f}"])
-
 
 class ShallowWaterEquation(esr.Module):
     def __init__(self, mesh_path: str, sw_path: str, dt=0.005, device='cpu') -> None:
@@ -294,4 +305,6 @@ if __name__ == "__main__":
     if args.profile:
         run_profile_timing(eqn, args)
     
-    c_profile_timing(eqn, args)
+    # # profile using
+    # c_profile_timing(eqn, args)
+    # torch_profile(eqn, args)

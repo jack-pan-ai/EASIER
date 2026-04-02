@@ -1206,6 +1206,7 @@ class JitEngine:
         if self.run_count == 0:
             handlers = self.create_first_run_handlers(stackframe)
         else:
+            # # profile
             # self.fake_gm()
             # return 
             handlers = self.create_runtime_handlers(stackframe)
@@ -1248,6 +1249,7 @@ class JitEngine:
 
         if self.run_count == 0:
             self.compile_after_first_run()
+            # # profile
             # from torch.fx import GraphModule
             # self.fake_gm = GraphModule(self.module, self.graph)
 
