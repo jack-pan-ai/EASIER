@@ -1216,7 +1216,7 @@ class JitEngine:
             # work under `forward` (native ATen time is attributed inside this
             # span instead of looking like an empty gap).
             # with torch.profiler.record_function(f"jit:node:{node.name}, target: {node.target}"):
-                # args and kwargs collections are mutable for Handlers to modify.
+            # args and kwargs collections are mutable for Handlers to modify.
             args, kwargs = [], {}
 
             for i_handler, handler in enumerate(handlers):

@@ -1,19 +1,18 @@
 #! /bin/bash
 # if jit compile is too slow, comment this one;
 # this will save the cache and reuse it for next run.
-# export EASIER_DISABLE_JIT_HASH=1
+export EASIER_DISABLE_JIT_HASH=1
 
-export OMP_NUM_THREADS=32
-export OMP_PLACES="{0:32}"
+export THREADS=20
+export OMP_PLACES="{0:20}"
 export OMP_PROC_BIND=close
-export OMP_DISPLAY_ENV=verbose
-export OMP_DISPLAY_AFFINITY=TRUE
+# export OMP_DISPLAY_ENV=verbose
+# export OMP_DISPLAY_AFFINITY=TRUE
+export LD_PRELOAD=$CONDA_PREFIX/lib/libtcmalloc.so.4:$LD_PRELOAD
 
 # Problem sizes (same as shallow water example)
 N_CPU=(1000 2000 3000 4000 5000)
 N_GPU=(1000 2000 3000 4000 5000)
-# N_CPU=(2000)
-# N_GPU=(500)
 
 mkdir -p res
 
@@ -78,13 +77,13 @@ for n in ${N_CPU[@]}
 do
     echo "Running main Poisson solve on CPU for n=${n}"
 
-    # CPU Torch backend
+    # # CPU Torch backend
     echo "  [CPU][torch backend] Profiling Poisson solve"
     torchrun --nproc_per_node=1 tutorial/poisson/poisson_profile.py \
         --solver=cg --profile=True --backend=torch \
         --maxiter=100 --atol=1e-10 --debug_iter=10 \
         --device=cpu --comm_backend=gloo --output=res/ \
-        --threads=${THREADS} --interop_threads=${INTEROP_THREADS} \
+        --threads=${THREADS} --interop_threads=1 \
         ~/.easier/triangular_${n}.hdf5 ~/.easier/Poisson_${n}.hdf5 \
 
     # CPU Easier JIT backend
@@ -93,7 +92,7 @@ do
         --solver=cg --profile=True --backend=cpu \
         --maxiter=100 --atol=1e-10 --debug_iter=10 \
         --device=cpu --comm_backend=gloo --output=res/ \
-        --threads=${THREADS} --interop_threads=${INTEROP_THREADS} \
+        --threads=${THREADS} --interop_threads=1 \
         ~/.easier/triangular_${n}.hdf5 ~/.easier/Poisson_${n}.hdf5
 done
 
@@ -111,7 +110,7 @@ do
         --solver=cg --profile=True --backend=torch \
         --maxiter=100 --atol=1e-10 --debug_iter=10 \
         --device=cuda --comm_backend=nccl --output=res/ \
-        --threads=${THREADS} --interop_threads=${INTEROP_THREADS} \
+        --threads=${THREADS} --interop_threads=1 \
         ~/.easier/triangular_${n}.hdf5 ~/.easier/Poisson_${n}.hdf5
 
     # CUDA Easier JIT backend
@@ -120,7 +119,7 @@ do
         --solver=cg --profile=True --backend=cuda \
         --maxiter=100 --atol=1e-10 --debug_iter=10 \
         --device=cuda --comm_backend=nccl --output=res/ \
-        --threads=${THREADS} --interop_threads=${INTEROP_THREADS} \
+        --threads=${THREADS} --interop_threads=1 \
         ~/.easier/triangular_${n}.hdf5 ~/.easier/Poisson_${n}.hdf5
 done
 

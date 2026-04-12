@@ -310,11 +310,15 @@ def aggregator_gen(aggregator_operations):
         aggregator_partial_forloop_code: list of code for the aggregator partial forloop
         aggregator_diagonal_code_search: list of code for the aggregator diagonal code search
         aggregator_tenosrs_carry_out_code: list of code for the aggregator tenosrs carry out
+        aggregator_consume_private_tmp: list of code for the aggregator consume private tmp
+        aggregator_consume_private_fixup_code: list of code for the aggregator consume private fixup
     """
     aggregator_partial_carry_fixup_code = []
     aggregator_partial_forloop_code = []
     aggregator_diagonal_code_search = []
     aggregator_tenosrs_carry_out_code = []
+    aggregator_consume_private_tmp = []
+    aggregator_consume_private_fixup_code = []
 
     if aggregator_operations != []:
         aggregator_diagonal_code_search.append(f"    int2 thread_coord; \n")
@@ -330,17 +334,21 @@ def aggregator_gen(aggregator_operations):
         _dim = get_dim_length(op['shape'])
         _name = op['name']
         if 'sum' in _name:
+            aggregator_consume_private_tmp.append(
+                f"    TensorOutput_{_name}_T {_name}_tmp(static_cast<ValueT>(0)); \n")
             aggregator_partial_carry_fixup_code.append(
                 f"    ApplyCarryOutFixupSum<ValueT, OffsetT, {_dim}>(num_threads, \
                     {_name}_running_carry_out, output_y_{_name}_ptr); \n")
             aggregator_partial_forloop_code.append(
-            f"    {_name}_running_carry_out[tid] += {op['args'][0]}; \n")
+            f"    {_name}_tmp += {op['args'][0]}; \n")
         elif 'norm' in _name:
+            aggregator_consume_private_tmp.append(
+                f"    TensorOutput_{_name}_T {_name}_tmp(static_cast<ValueT>(0)); \n")
             aggregator_partial_carry_fixup_code.append(
                 f"    ApplyCarryOutFixupNorm<ValueT, OffsetT, {_dim}>(num_threads, \
                     {_name}_running_carry_out, output_y_{_name}_ptr); \n")
             aggregator_partial_forloop_code.append(
-            f"    {_name}_running_carry_out[tid] += {op['args'][0]} * {op['args'][0]}; \n")
+            f"    {_name}_tmp += {op['args'][0]} * {op['args'][0]}; \n")
         else:
             raise ValueError(f"Operation {_name} not supported")
         aggregator_partial_carry_fixup_code.append(
@@ -349,11 +357,14 @@ def aggregator_gen(aggregator_operations):
         aggregator_tenosrs_carry_out_code.append(
             f"    TensorOutput_{_name}_T* {_name}_running_carry_out=new \
                 TensorOutput_{_name}_T[num_threads]; \n")
+        aggregator_consume_private_fixup_code.append(
+            f"    {_name}_running_carry_out[tid] = {_name}_tmp; \n")
 
     # # debug
     # debug_print(aggregator_partial_carry_fixup_code, "aggregator_partial_carry_fixup_code")
     return aggregator_partial_carry_fixup_code, aggregator_partial_forloop_code, \
-        aggregator_diagonal_code_search, aggregator_tenosrs_carry_out_code
+        aggregator_diagonal_code_search, aggregator_tenosrs_carry_out_code, \
+        aggregator_consume_private_tmp, aggregator_consume_private_fixup_code
 
 
 def reducer_gen(reducer_operations):

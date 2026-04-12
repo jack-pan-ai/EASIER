@@ -175,35 +175,10 @@ if __name__ == '__main__':
     if args.profile:
         run_profile_timing(sol, args)
     else:
-        info = sol.solve(
-            maxiter=args.maxiter,
-            atol=args.atol,
-            debug_iter=args.debug_iter
-        )
-        assert info["residual"] < args.atol
+        print("Running main Poisson solve")
 
-        if args.plot:
-            rho = eqn.rho.collect().cpu().numpy()
-            x_synced = eqn.x.collect().cpu().numpy()
-            centroid = eqn.centroid.collect().cpu().numpy()
+    # # c profile timing for CG solver
+    # sol.c_profile_timing_cg()
 
-            if int(os.environ.get("LOCAL_RANK", 0)) == 0:
-                cells = tri.Triangulation(centroid[::1, 0], centroid[::1, 1])
-
-                plt.figure(figsize=(6, 5))
-                im = plt.tricontourf(cells, rho[::1], levels=50, cmap='jet')
-                # plt.triplot(points, linewidth=0.1)
-                plt.colorbar(im)
-                plt.tight_layout()
-                plt.savefig('rho.jpeg', dpi=300)
-                plt.cla()
-
-                plt.figure(figsize=(6, 5))
-                im = plt.tricontourf(
-                    cells, x_synced[::1], levels=50, cmap='jet'
-                )
-                # plt.triplot(points, linewidth=0.1)
-                plt.colorbar(im)
-                plt.tight_layout()
-                plt.savefig('phi.jpeg', dpi=300)
-                plt.cla()
+    # # torch profile for CG solver
+    # sol.torch_profile()

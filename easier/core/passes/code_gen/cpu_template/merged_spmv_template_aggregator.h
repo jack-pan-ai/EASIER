@@ -120,8 +120,10 @@ void OmpMergeSystem(
 
 #pragma omp parallel for schedule(static) num_threads(num_threads)
   for (int tid = 0; tid < num_threads; tid++) {
+    // OffsetT num_merge_items =
+    //     num_rows + num_nonzeros; // Merge path total length
     OffsetT num_merge_items =
-        num_rows + num_nonzeros; // Merge path total length
+        num_nonzeros; // Merge path total length
     OffsetT items_per_thread = (num_merge_items + num_threads - 1) /
                                num_threads; // Merge items per thread
 
@@ -135,6 +137,7 @@ void OmpMergeSystem(
         std::min(tid * items_per_thread + items_per_thread, num_nonzeros);
 
     // Consume whole rows
+    ${aggregator_consume_private_tmp}
 
     ${reducer_consume_init_code}
     for (; thread_coord.y < thread_coord_end.y; ++thread_coord.y) {
@@ -150,6 +153,7 @@ void OmpMergeSystem(
       // output for map
       ${output_agent_forloop_code}
     }
+    ${aggregator_consume_private_fixup_code}
   }
   // carry-out fix-up for aggregators
   ${aggregator_partial_carry_fixup_code}

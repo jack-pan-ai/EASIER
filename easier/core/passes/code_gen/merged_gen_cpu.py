@@ -81,13 +81,16 @@ def generate_cpu_code_from_graph(submodule, traced_model):
     # debug
     # debug_print(aggregator_operations, "aggregator_operations")
     aggregator_partial_carry_fixup_code, aggregator_partial_forloop_code, \
-        aggregator_diagonal_code_search, aggregator_tenosrs_carry_out_code = aggregator_gen(
+        aggregator_diagonal_code_search, aggregator_tenosrs_carry_out_code, \
+        aggregator_consume_private_tmp, aggregator_consume_private_fixup_code = aggregator_gen(
         aggregator_operations)
     if os.getenv("EASIER_VERBOSE_CODEGEN") in ("1", "", "true", "True"):
         debug_print(aggregator_partial_carry_fixup_code, "aggregator_partial_carry_fixup_code")
         debug_print(aggregator_partial_forloop_code, "aggregator_partial_forloop_code")
         debug_print(aggregator_diagonal_code_search, "aggregator_diagonal_code_search")
         debug_print(aggregator_tenosrs_carry_out_code, "aggregator_tenosrs_carry_out_code")
+        debug_print(aggregator_consume_private_tmp, "aggregator_consume_private_tmp")
+        debug_print(aggregator_consume_private_fixup_code, "aggregator_consume_private_fixup_code")
     # Read template files
     _tag = "reducer" if reducer_operations != [] else "aggregator"
     project_root = os.path.abspath(os.path.dirname(__file__))
@@ -125,6 +128,8 @@ def generate_cpu_code_from_graph(submodule, traced_model):
         aggregator_diagonal_code_search)
     aggregator_tenosrs_carry_out_code_str = trans_str(
         aggregator_tenosrs_carry_out_code)
+    aggregator_consume_private_tmp_str = trans_str(aggregator_consume_private_tmp)
+    aggregator_consume_private_fixup_code_str = trans_str(aggregator_consume_private_fixup_code)
     spmv_kernel_code = string.Template(kernel_spmv_template).substitute(
         input_parameters_code=input_parameters_str,
         input_agent_tenosrs_code=input_agent_tenosrs_str,
@@ -144,6 +149,8 @@ def generate_cpu_code_from_graph(submodule, traced_model):
         aggregator_partial_forloop_code=aggregator_partial_forloop_code_str,
         aggregator_diagonal_code_search=aggregator_diagonal_code_search_str,
         aggregator_tenosrs_carry_out_code=aggregator_tenosrs_carry_out_code_str,
+        aggregator_consume_private_tmp=aggregator_consume_private_tmp_str,
+        aggregator_consume_private_fixup_code=aggregator_consume_private_fixup_code_str,
     )
 
     # Write files
