@@ -22,8 +22,10 @@ COLOR_TORCH = '#59A14F'  # Distinct, colorblind-friendly green (Tableau 10 palet
 # N_CPU and N_GPU values from easier_swe.sh
 # N_CPU=[500, 1000, 1500, 2000, 2500, 3000]
 # N_GPU=[500, 1000, 1500, 2000, 2500, 3000]
-N_CPU=[500, 1000, 1500, 2000]
-N_GPU=[500, 1000, 1500, 2000]
+# N_CPU=[500, 1000, 1500, 2000]
+# N_GPU=[500, 1000, 1500, 2000] # v100
+N_CPU=[1000, 2000, 3000, 4000]
+N_GPU=[1000, 2000, 3000, 4000] # h100
 # Show only the first N points in plots (set to 5 or 4, etc.; None keeps all)
 PLOT_FIRST_N = 5
 
