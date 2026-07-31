@@ -666,11 +666,7 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
         # Generate per submodule and snapshot immediately to avoid file clobbering
         for node_name, node, submod in callmods:
             logger.info(f"Node: {node_name}")
-            forwarding = (
-                _find_forwarded_reducer_outputs(submod, g, node)
-                if backend == 'cuda'
-                else []
-            )
+            forwarding = _find_forwarded_reducer_outputs(submod, g, node)
             forwarding_plans[(id(g), node_name)] = forwarding
             # check each submodule details for debugs 
             # submod.graph.print_tabular()
@@ -692,7 +688,13 @@ def code_generation(ms: List[object], gs: List[object]) -> Tuple[List[object], L
                         _snapshot_generated_source_cuda(node_name)
             elif backend == 'cpu':
                 with _codegen_lock():
-                    generate_cpu_code_from_graph(submod, g)
+                    generate_cpu_code_from_graph(
+                        submod,
+                        g,
+                        forwarded_output_indices=[
+                            item.output_index for item in forwarding
+                        ],
+                    )
                     snap_src, snap_inc, source_hash = \
                         _snapshot_generated_source_cpu(node_name)
             else:

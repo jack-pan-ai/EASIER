@@ -14,6 +14,7 @@ ${function_params}
 ) {
 ${basic_checks}
 ${dtype_checks}
+${output_checks}
 
   const int64_t ne = ${ne_expr};
   TORCH_CHECK(ne > 0, "selector index must be non-empty (ne > 0)");
@@ -74,4 +75,3 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 ${pybind_args}
   );
 }
-

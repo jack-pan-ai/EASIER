@@ -16,7 +16,9 @@ def debug_print(code, code_name):
     else:
         logger.debug(f"{code_name} is empty")
 
-def generate_cpu_code_from_graph(submodule, traced_model):
+def generate_cpu_code_from_graph(
+        submodule, traced_model, forwarded_output_indices=()
+    ):
     """
     Generate CPU code from the graph
 
@@ -160,4 +162,10 @@ def generate_cpu_code_from_graph(submodule, traced_model):
     logger.info("CPU code generated successfully!")
 
     # Also generate the CPU binding cpp file next to project root
-    generate_cpu_binding_code(project_root, inputs, outputs, selector_register)
+    generate_cpu_binding_code(
+        project_root,
+        inputs,
+        outputs,
+        selector_register,
+        forwarded_output_indices=forwarded_output_indices,
+    )

@@ -10,7 +10,8 @@ from easier.core.utils import logger
 
 
 def generate_cpu_binding_code(
-        project_root, inputs, outputs, selector_register
+        project_root, inputs, outputs, selector_register,
+        forwarded_output_indices=(),
     ):
     """
     Generate the CPU/Torch extension binding (merged_binding_cpu.cpp) from graph metadata.
@@ -21,6 +22,12 @@ def generate_cpu_binding_code(
         outputs: list of output node dicts from trace_graph
         selector_register: list of selector metadata from trace_graph
     """
+    forwarded_output_indices = tuple(
+        sorted(set(forwarded_output_indices))
+    )
+    if any(i < 0 or i >= len(outputs) for i in forwarded_output_indices):
+        raise ValueError("forwarded output index is out of range")
+
     # Infer argument ordering compatible with runtime wrapper:
     #  - value inputs excluding any selector target(s)
     #  - selector index tensors (unique per target)
@@ -80,6 +87,12 @@ def generate_cpu_binding_code(
         ("num_rows", "size"),
         ("num_cols", "size"),
     ])
+    forwarded_output_params = {
+        idx: f"forward_out_{idx}_{outputs[idx]['name']}"
+        for idx in forwarded_output_indices
+    }
+    for idx in forwarded_output_indices:
+        bind_params.append((forwarded_output_params[idx], "output"))
 
     # Load CPU binding template
     template_binding_path = os.path.join(
@@ -93,15 +106,29 @@ def generate_cpu_binding_code(
     output_allocations = []
     output_tuple_returns_list = []
     output_ptrs = []
+    output_checks = []
 
-    def add_output(out_name: str, dim: int, size_expr: str, idx: int):
-        var_name = f"out_{idx}_{out_name}"
-        # Uninitialized buffer: OmpMergeSystem writes every output element (map
-        # per edge, reducer per row, aggregators in fixup). torch::zeros would
-        # call aten::fill_ on the full tensor and dominated CPU profiles.
-        output_allocations.append(
-            f"  torch::Tensor {var_name} = torch::empty({{{size_expr}}}, options_val);\n"
-        )
+    def add_output(
+            out_name: str, dim: int, size_expr: str, numel_expr: str, idx: int
+        ):
+        if idx in forwarded_output_params:
+            var_name = forwarded_output_params[idx]
+            output_checks.append(
+                f"  TORCH_CHECK({var_name}.numel() == {numel_expr}, "
+                f"\"{var_name} has the wrong number of elements\");\n"
+            )
+            output_checks.append(
+                f"  TORCH_CHECK({var_name}.device() == "
+                f"{dispatch_tensor_name}.device(), "
+                f"\"{var_name} must be on the same device as inputs\");\n"
+            )
+        else:
+            var_name = f"out_{idx}_{out_name}"
+            # Uninitialized buffer: OmpMergeSystem writes every output element
+            # (map per edge, reducer per row, aggregators in fixup).
+            output_allocations.append(
+                f"  torch::Tensor {var_name} = torch::empty({{{size_expr}}}, options_val);\n"
+            )
         # output_allocations.append(
         #     f"  torch::Tensor {var_name} = torch::zeros({{{size_expr}}}, options_val);\n"
         # )
@@ -118,11 +145,17 @@ def generate_cpu_binding_code(
         dim = get_dim_length(o["shape"])
         out_name = o["name"]
         if str(o["target"]) == "reducer":
-            add_output(out_name, dim, make_shape_expr("num_rows", dim), idx)
+            add_output(
+                out_name, dim, make_shape_expr("num_rows", dim),
+                "num_rows" if dim == 1 else f"num_rows * {dim}", idx,
+            )
         elif 'sum' in str(o["target"]) or 'norm' in str(o["target"]):
-            add_output(out_name, dim, f"{dim}", idx)
+            add_output(out_name, dim, f"{dim}", f"{dim}", idx)
         else:
-            add_output(out_name, dim, make_shape_expr("ne", dim), idx)
+            add_output(
+                out_name, dim, make_shape_expr("ne", dim),
+                "ne" if dim == 1 else f"ne * {dim}", idx,
+            )
 
     if output_tuple_returns_list:
         output_tuple_returns = ", ".join(output_tuple_returns_list)
@@ -161,7 +194,7 @@ def generate_cpu_binding_code(
     # Checks
     basic_checks = []
     for n, k in bind_params:
-        if k in ("value", "index"):
+        if k in ("value", "index", "output"):
             basic_checks.append(f"  TORCH_CHECK({n}.device().is_cpu(), \"{n} must be a CPU tensor\");\n")
             basic_checks.append(f"  TORCH_CHECK({n}.is_contiguous(), \"{n} must be contiguous\");\n")
 
@@ -183,6 +216,13 @@ def generate_cpu_binding_code(
     dtype_checks.append(
         "  TORCH_CHECK(row_end_offsets.scalar_type() == c10::CppTypeToScalarType<OffsetT>::value, \"row_end_offsets dtype mismatch\");\n"
     )
+    for idx in forwarded_output_indices:
+        n = forwarded_output_params[idx]
+        dtype_checks.append(
+            f"  TORCH_CHECK({n}.scalar_type() == "
+            f"c10::CppTypeToScalarType<ValueT>::value, "
+            f"\"{n} dtype mismatch\");\n"
+        )
 
     # ne expr and bsx/bsy size checks
     if selector_inputs:
@@ -271,6 +311,7 @@ def generate_cpu_binding_code(
         dtype_checks="".join(dtype_checks),
         ne_expr=ne_expr,
         ne_multiple_checks="".join(ne_multiple_checks),
+        output_checks="".join(output_checks),
         dispatch_tensor=dispatch_tensor_name,
         output_allocations="".join(output_allocations),
         value_ptrs="",
@@ -287,4 +328,3 @@ def generate_cpu_binding_code(
     with open(binding_path, "w") as f:
         f.write(binding_code)
     logger.info(f"CPU binding code generated successfully at {binding_path}!")
-
