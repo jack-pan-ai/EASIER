@@ -22,6 +22,7 @@ ${dtype_checks}
   TORCH_CHECK(ne > 0, "selector index must be non-empty");
   // TORCH_CHECK(row_end_offsets.numel() == num_rows + 1, "row_end_offsets must have length num_rows + 1");
 ${ne_multiple_checks}
+${output_checks}
 
   auto options_val = torch::TensorOptions().dtype(${dispatch_tensor}.scalar_type()).device(${dispatch_tensor}.device());
 ${output_allocations}
@@ -31,34 +32,28 @@ ${params_value_ptrs}
 ${params_index_ptrs}
 ${params_output_ptrs}
   params.d_row_end_offsets = reinterpret_cast<OffsetT*>(row_end_offsets.data_ptr());
-  params.num_rows = static_cast<int>(num_rows);
-  params.num_cols = static_cast<int>(num_cols);
-  params.num_nonzeros = static_cast<int>(ne);
+  params.num_rows = static_cast<OffsetT>(num_rows);
+  params.num_cols = static_cast<OffsetT>(num_cols);
+  params.num_nonzeros = static_cast<OffsetT>(ne);
 
-  size_t temp_storage_bytes = 0;
-  auto stream = at::cuda::getCurrentCUDAStream();
-
-  // Always do a clean size query with nullptr to avoid any invalid-pointer paths
-  void* d_temp_storage = nullptr;
-  cudaError_t err = merged::merged_spmv_launch<ValueT, OffsetT>(
-      params, /*d_temp_storage=*/nullptr, temp_storage_bytes, /*debug_synchronous=*/false, stream.stream());
-  TORCH_CHECK(err == cudaSuccess, "merged_spmv_launch (size query) failed: ", cudaGetErrorString(err));
-
-  if (temp_storage_bytes > 0) {
-    // In-place resize only: do not rebind to a new tensor or change device
-    TORCH_CHECK(temp_storage.defined(), "temp_storage must be provided as a CUDA uint8 tensor");
-    TORCH_CHECK(temp_storage.device() == ${dispatch_tensor}.device(), "temp_storage must be on the same device as inputs");
-    if (static_cast<size_t>(temp_storage.numel()) < temp_storage_bytes) {
-      temp_storage.resize_({static_cast<long long>(temp_storage_bytes)});
-    }
-    d_temp_storage = temp_storage.data_ptr();
-  }
-
-  err = merged::merged_spmv_launch<ValueT, OffsetT>(
-      params, d_temp_storage, temp_storage_bytes, /*debug_synchronous=*/false, stream.stream());
-  TORCH_CHECK(err == cudaSuccess, "merged_spmv_launch failed: ", cudaGetErrorString(err));
+${launch_code}
 
   ${output_tuple_returns}
+}
+
+template <typename ValueT>
+${tuple_type_return} merged_spmv_launch_index_dispatch(
+${function_params}
+  , torch::Tensor temp_storage
+) {
+  switch (row_end_offsets.scalar_type()) {
+    case torch::kInt:
+      return merged_spmv_launch_typed<ValueT, int>(${function_call_args}, temp_storage);
+    case torch::kLong:
+      return merged_spmv_launch_typed<ValueT, int64_t>(${function_call_args}, temp_storage);
+    default:
+      TORCH_CHECK(false, "Unsupported index dtype. Use int32 or int64.");
+  }
 }
 
 ${tuple_type_return} merged_spmv_launch_bind(
@@ -68,9 +63,9 @@ ${function_params}
   TORCH_CHECK(${dispatch_tensor}.device().is_cuda(), "CUDA device required");
   switch (${dispatch_tensor}.scalar_type()) {
     case torch::kFloat:
-      return merged_spmv_launch_typed<float, int>(${function_call_args}, temp_storage);
+      return merged_spmv_launch_index_dispatch<float>(${function_call_args}, temp_storage);
     case torch::kDouble:
-      return merged_spmv_launch_typed<double, int>(${function_call_args}, temp_storage);
+      return merged_spmv_launch_index_dispatch<double>(${function_call_args}, temp_storage);
     ${optional_long_case}    
     default:
       std::cerr << "Unsupported dtype for ValueT. dtype code: " << static_cast<int>(${dispatch_tensor}.scalar_type()) << std::endl;
@@ -89,4 +84,3 @@ ${pybind_args}
       , py::arg("temp_storage")
   );
 }
-

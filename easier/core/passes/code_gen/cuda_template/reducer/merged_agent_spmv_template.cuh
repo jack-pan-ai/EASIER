@@ -176,6 +176,8 @@ namespace merged
         {
         }
 
+${register_fed_evaluator_code}
+
         //---------------------------------------------------------------------
         // Tile processing
         //---------------------------------------------------------------------
@@ -210,8 +212,8 @@ namespace merged
                 OffsetT(threadIdx.x * ITEMS_PER_THREAD), // Diagonal
                 s_tile_row_end_offsets,                  // List A
                 tile_nonzero_indices,                    // List B
-                tile_num_rows,
-                tile_num_nonzeros,
+                static_cast<OffsetT>(tile_num_rows),
+                static_cast<OffsetT>(tile_num_nonzeros),
                 thread_start_coord);
 
             CTA_SYNC(); // Perf-sync
@@ -228,7 +230,10 @@ namespace merged
             int tile_num_rows,                  ///< [in] Number of rows in the merge tile
             int tile_num_nonzeros,               ///< [in] Number of non-zeros in the merge tile
             ValueT *output_vector_y,             ///< [out] Output vector y
-            typename BlockScanT::TempStorage &scan_storage ///< [in] Scan storage for BlockScanT operations
+            typename BlockScanT::TempStorage &scan_storage, ///< [in] Scan storage for BlockScanT operations
+            int tile_idx,                        ///< [in] Merge tile index
+            int num_merge_tiles,                 ///< [in] Carry-buffer stride
+            int carry_lane_offset                ///< [in] First lane for this reducer
         )
         {
             typedef TensorKey<OffsetT, ValueT, DimReducer> TensorKeyT;
@@ -239,7 +244,7 @@ namespace merged
             CountingInputIterator<OffsetT> tile_nonzero_indices(tile_start_coord.y);
 
             OffsetT row_end_offset = s_tile_row_end_offsets[thread_current_coord.x];
-            TensorT nonzero = s_tile_value_nonzeros[thread_current_coord.y];
+${nonzero_initialization_code}
 
 // Reduce
 #pragma unroll
@@ -248,10 +253,11 @@ namespace merged
                 if (tile_nonzero_indices[thread_current_coord.y] < row_end_offset)
                 {
 // Move down (accumulate)
+${nonzero_load_code}
                     scan_segment[ITEM].set(nonzero.values);
                     running_total = running_total + nonzero;
                     ++thread_current_coord.y;
-                    nonzero = s_tile_value_nonzeros[thread_current_coord.y];
+${nonzero_advance_code}
                 }
                 else
                 {
@@ -313,37 +319,38 @@ namespace merged
 
                 CTA_SYNC();
 
-// memory coalescing for writing the output vector y
+// Every row boundary is owned by exactly one merge tile.  Initialize that
+// completed-row suffix directly; a later carry-only kernel adds prefixes from
+// preceding tiles for rows that cross tile boundaries.
 #pragma unroll 1
                 for (int item = threadIdx.x; item < tile_num_rows; item += BLOCK_THREADS)
                 {
                     #pragma unroll
                     for (int i = 0; i < DimReducer; i++)
                     {
-                        atomicAdd(
-                            &output_vector_y[(tile_start_coord.x + item) * DimReducer + i],
-                            s_partials[item].values[i]
-                        );
+                        output_vector_y[
+                            (tile_start_coord.x + item) * DimReducer + i
+                        ] = s_partials[item].values[i];
                     }
                 }
             }
 
             CTA_SYNC();
 
-            // atomic add the residual sum, the tile's carry-out, to the Global memory
+            // Save one residual vector per tile.  Keeping carries separate
+            // removes the full reducer-output zero pass and confines atomics
+            // to the compact tile-carry stream instead of every completed row.
             if (threadIdx.x == 0)
             {
                 tile_carry.key += tile_start_coord.x;
-                if (tile_carry.key < spmv_params.num_rows)
+                spmv_params.d_tile_carry_keys[tile_idx] = tile_carry.key;
+                #pragma unroll
+                for (int i = 0; i < DimReducer; i++)
                 {
-                    #pragma unroll
-                    for (int i = 0; i < DimReducer; i++)
-                    {
-                        atomicAdd(
-                            &output_vector_y[tile_carry.key * DimReducer + i],
-                            tile_carry.values[i]);
-                    }
-                };
+                    spmv_params.d_tile_carry_values[
+                        (carry_lane_offset + i) * num_merge_tiles + tile_idx
+                    ] = tile_carry.values[i];
+                }
             }
         }
 
@@ -352,6 +359,7 @@ namespace merged
          */
         __device__ __forceinline__ void ConsumeTile(
             int tile_idx,
+            int num_merge_tiles,
             CoordinateT tile_start_coord,
             CoordinateT tile_end_coord,
             Int2Type<true> is_direct_load) ///< Marker type indicating whether to load nonzeros directly during path-discovery or beforehand in batch
@@ -361,26 +369,7 @@ namespace merged
 
             loading_offsets(tile_num_rows, tile_start_coord);
 
-// Select
-// Gather the nonzeros for the merge tile into shared memory
-#pragma unroll
-            for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
-            {
-                int nonzero_idx = threadIdx.x + (ITEM * BLOCK_THREADS);
-
-                if (nonzero_idx < tile_num_nonzeros)
-                {
-                    // [code generation]
-                    ${selector_code}
-
-                    // map
-                    ${map_code}
-
-                    //output for map
-                    ${output_agent_forloop_code}
-                }
-            }
-            CTA_SYNC();
+${nonzero_preparation_code}
 
             // reduce the intermeidate computations 
             // all reducers share the same row end offsets 
@@ -415,7 +404,7 @@ namespace merged
             if (threadIdx.x < 2) 
             { 
                 if (d_tile_coordinates == NULL) 
-                { 
+                {
                     // Search our starting coordinates 
                     OffsetT diagonal = (tile_idx + threadIdx.x) * TILE_ITEMS; 
                     CoordinateT tile_coord; 
@@ -442,6 +431,7 @@ namespace merged
 
             ConsumeTile(
                 tile_idx,
+                num_merge_tiles,
                 tile_start_coord,
                 tile_end_coord,
                 Int2Type<AgentSpmvPolicyT::DIRECT_LOAD_NONZEROS>()); // PTX >=520 use the indirect load of nonzeros

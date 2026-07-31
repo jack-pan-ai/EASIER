@@ -56,13 +56,16 @@ namespace merged
                 break;
 
             // Total number of spmv work items
-            int num_merge_items = spmv_params.num_rows + spmv_params.num_nonzeros;
+            OffsetT num_merge_items =
+                spmv_params.num_rows + spmv_params.num_nonzeros;
 
             // Tile sizes of kernels
             int merge_tile_size = spmv_config.block_threads * spmv_config.items_per_thread;
 
             // Number of tiles for kernels
-            int num_merge_tiles = cub::DivideAndRoundUp(num_merge_items, merge_tile_size);
+            int num_merge_tiles = static_cast<int>(
+                cub::DivideAndRoundUp(num_merge_items,
+                                      static_cast<OffsetT>(merge_tile_size)));
 
             // Get SM occupancy for kernels
             int spmv_sm_occupancy;

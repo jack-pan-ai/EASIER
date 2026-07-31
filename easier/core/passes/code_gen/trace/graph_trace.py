@@ -9,6 +9,7 @@ from easier.core.module import Reducer, Selector
 from easier.core.runtime.metadata import Role
 from easier.core.passes.dataflow_fusion.node_group import \
     NodeGroup, get_node_group
+from easier.core.passes.utils import get_called_module
 from easier.core.utils import logger
 
 def get_node_info(node, node_meta_dict, node_placeholder_meta_dict):
@@ -56,13 +57,26 @@ def trace_graph(submodule, traced_model):
     # obtain the traced nodes list (exclude the output node)
     traced_nodes = list(submodule.graph.nodes)
     
+    node_group = get_node_group(submodule)
+
+    def called_module_is(node, module_type):
+        """Classify call_module nodes, including compiler-inserted nodes.
+
+        FX's ``nn_module_stack`` metadata is optional and is absent on CSR
+        Selectors inserted after the original symbolic trace. Resolve the
+        actual called module from the NodeGroup root instead of assuming that
+        metadata exists.
+        """
+        return node.op == 'call_module' and isinstance(
+            get_called_module(node_group.root, node), module_type
+        )
+
     # dict here only provide the metadata info
-    node_meta_dict = {node.name: node for node in get_node_group(submodule).nodes}
+    node_meta_dict = {node.name: node for node in node_group.nodes}
     # prepare the selector and selector tensor list
-    selector_set = set([node.name for node in get_node_group(submodule).nodes \
-        if node.op == 'call_module' and \
-            list(node.meta['nn_module_stack'].values())[-1][1] == Selector])
-    selector_tensor_set = set([node.args[0].name for node in get_node_group(submodule).nodes \
+    selector_set = set([node.name for node in node_group.nodes
+        if called_module_is(node, Selector)])
+    selector_tensor_set = set([node.args[0].name for node in node_group.nodes \
         if node.name in selector_set])
     # the placeholder nodes here will contain the reducer nodes (which is not used)
     node_placeholder_meta_dict = {node.name: node \
@@ -108,8 +122,7 @@ def trace_graph(submodule, traced_model):
                 node_shape, op, name, target, args, \
                     node_dtype, shape_ahead, shape_all = \
                         get_node_info(_node, node_meta_dict, node_placeholder_meta_dict)
-                if op == 'call_module' and \
-                list(node_meta_dict[name].meta["nn_module_stack"].values())[-1][1] == Reducer:
+                if called_module_is(node_meta_dict[name], Reducer):
                     target = 'reducer'
                 if op == 'call_function' and "setitem" in str(target):
                     name = args[0]
@@ -164,8 +177,7 @@ def trace_graph(submodule, traced_model):
                     "shape_all": shape_all,
                 }
             )
-        elif op == 'call_module' and \
-             list(node_meta_dict[name].meta["nn_module_stack"].values())[-1][1] == Selector:
+        elif called_module_is(node_meta_dict[name], Selector):
             # 2) obtain the selector index
             inputs.append(
                 {

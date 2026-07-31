@@ -124,23 +124,58 @@ namespace merged
         };
 
         // Tensor and TensorKey for input vector x
-          typedef Tensor<ValueT, 1> TensorInput_truediv_2_T; 
-  typedef Tensor<ValueT, 1> TensorInput_truediv_7_T; 
-  typedef Tensor<ValueT, 1> TensorInput_truediv_12_T; 
-  typedef Tensor<ValueT, 1> TensorInput_scatter_9_T; 
-  typedef Tensor<ValueT, 1> TensorInput_area_T; 
-  typedef Tensor<ValueT, 1> TensorInput_h_T; 
+          typedef Tensor<ValueT, 4> TensorInput_particle_values_T; 
+  typedef Tensor<ValueT, 2> TensorInput_receiver_centers_T; 
+  typedef Tensor<ValueT, 2> TensorInput_positions_T; 
 
+
+        // Tensor and TensorKey for map 
+          typedef Tensor<ValueT, 1> TensorOutput_getitem_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_getitem_1_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_1_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_getitem_2_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_2_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_getitem_3_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_3_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_1_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_1_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_abs_1_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_2_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_2_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_3_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_3_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_4_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_lt_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_where_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_abs_2_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_5_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_4_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_sub_5_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_6_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_7_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_lt_1_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_where_1_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_mul_8_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_getitem_4_T; 
+  typedef Tensor<ValueT, 1> TensorOutput_clone_4_T; 
+  typedef Tensor<ValueT, 4> TensorOutput_gt_T; 
+  typedef Tensor<ValueT, 4> TensorOutput_where_2_T; 
+  typedef Tensor<ValueT, 4> TensorOutput_mul_9_T; 
 
         // Tensor and TensorKey for reducers 
-        
-          typedef Tensor<ValueT, 1> TensorOutput_neg_9_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_truediv_17_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_add_49_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_add_50_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_add_51_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_mul_85_T; 
-  typedef Tensor<ValueT, 1> TensorOutput_add__T; 
+          // Tensor and TensorKey for reducers 
+  typedef TensorKey<OffsetT, ValueT, 4>                     TensorKeyOutput_reduce_receiver_T; 
+  typedef Tensor<ValueT, 4> TensorOutput_reduce_receiver_T; 
+  // Reduce-value-by-segment scan operator 
+  typedef ReduceTensorByKeyOp<TensorKeyOutput_reduce_receiver_T>                        ReduceBySegmentOp_reduce_receiver_T; 
+  typedef BlockScan< 
+            TensorKeyOutput_reduce_receiver_T, 
+            BLOCK_THREADS, 
+            AgentSpmvPolicyT::SCAN_ALGORITHM> 
+            BlockScan_reduce_receiver_T; 
 
 
         /// Shared memory type required by this thread block
@@ -149,7 +184,9 @@ namespace merged
             // tile coordinates for blocks
             CoordinateT tile_coords[2];
             // smem for intermediate results and scan
-            
+                           SmemReuseReducer<4,                     BlockScan_reduce_receiver_T> smem_reduce_receiver; 
+
+            OffsetT s_tile_row_end_offsets[TILE_ITEMS];
         };
 
         /// Temporary storage type (unionable)
@@ -167,12 +204,11 @@ namespace merged
         RowOffsetsIteratorT wd_row_end_offsets;
 
         // [code generation] wrapper pointers for loading the data
-          VectorValueIteratorT truediv_2_ptr; 
-  VectorValueIteratorT truediv_7_ptr; 
-  VectorValueIteratorT truediv_12_ptr; 
-  VectorValueIteratorT scatter_9_ptr; 
-  VectorValueIteratorT area_ptr; 
-  VectorValueIteratorT h_ptr; 
+          VectorValueIteratorT particle_values_ptr; 
+  VectorValueIteratorT receiver_centers_ptr; 
+  VectorValueIteratorT positions_ptr; 
+  ColumnIndicesIteratorT select_source_ptr; 
+  ColumnIndicesIteratorT select_receiver_center_ptr; 
 
 
         //---------------------------------------------------------------------
@@ -188,16 +224,64 @@ namespace merged
             FlexParams<ValueT, OffsetT> &spmv_params) ///< SpMV input parameter bundle
             : temp_storage(temp_storage.Alias()),
                 wd_row_end_offsets(spmv_params.d_row_end_offsets),
-                  truediv_2_ptr(spmv_params.truediv_2_ptr), 
-    truediv_7_ptr(spmv_params.truediv_7_ptr), 
-    truediv_12_ptr(spmv_params.truediv_12_ptr), 
-    scatter_9_ptr(spmv_params.scatter_9_ptr), 
-    area_ptr(spmv_params.area_ptr), 
-    h_ptr(spmv_params.h_ptr), 
+                  particle_values_ptr(spmv_params.particle_values_ptr), 
+    receiver_centers_ptr(spmv_params.receiver_centers_ptr), 
+    positions_ptr(spmv_params.positions_ptr), 
+    select_source_ptr(spmv_params.select_source_ptr), 
+    select_receiver_center_ptr(spmv_params.select_receiver_center_ptr), 
 
               spmv_params(spmv_params)
         {
         }
+
+        __device__ __forceinline__
+        TensorOutput_reduce_receiver_T evaluate_reducer_nonzero(
+            OffsetT nonzero_idx, OffsetT row_idx)
+        {
+    ColumnIndicesIteratorT select_source_ptr_current =                         select_source_ptr + nonzero_idx; 
+    TensorInput_positions_T                         select_source(positions_ptr + *select_source_ptr_current * 2); 
+    const OffsetT select_receiver_center_ptr_current = row_idx; 
+    TensorInput_receiver_centers_T select_receiver_center(receiver_centers_ptr + static_cast<size_t>(select_receiver_center_ptr_current) * 2); 
+    ColumnIndicesIteratorT select_source_1_ptr_current =                         select_source_ptr + nonzero_idx; 
+    TensorInput_particle_values_T                         select_source_1(particle_values_ptr + *select_source_1_ptr_current * 4); 
+    TensorOutput_getitem_T                         getitem(select_receiver_center.values[0]); 
+    TensorOutput_clone_T clone(getitem); 
+    TensorOutput_getitem_1_T                         getitem_1(select_receiver_center.values[1]); 
+    TensorOutput_clone_1_T clone_1(getitem_1); 
+    TensorOutput_getitem_2_T                         getitem_2(select_source.values[0]); 
+    TensorOutput_clone_2_T clone_2(getitem_2); 
+    TensorOutput_getitem_3_T                         getitem_3(select_source.values[1]); 
+    TensorOutput_clone_3_T clone_3(getitem_3); 
+    TensorOutput_sub_T sub = clone -                     clone_2; 
+    TensorOutput_mul_T mul = sub *                     4608000.0; 
+    TensorOutput_sub_1_T sub_1 = clone_1 -                     clone_3; 
+    TensorOutput_mul_1_T mul_1 = sub_1 *                     4608000.0; 
+    TensorOutput_abs_1_T abs_1 = mul.abs(); 
+    TensorOutput_mul_2_T mul_2 = abs_1 *                     abs_1; 
+    TensorOutput_sub_2_T sub_2 = 0.75 -                     mul_2; 
+    TensorOutput_sub_3_T sub_3 = 1.5 -                     abs_1; 
+    TensorOutput_mul_3_T mul_3 = 0.5 *                     sub_3; 
+    TensorOutput_mul_4_T mul_4 = mul_3 *                     sub_3; 
+    TensorOutput_lt_T lt = abs_1 < 0.5; 
+    TensorOutput_where_T where =                     _where(lt, sub_2, mul_4); 
+    TensorOutput_abs_2_T abs_2 = mul_1.abs(); 
+    TensorOutput_mul_5_T mul_5 = abs_2 *                     abs_2; 
+    TensorOutput_sub_4_T sub_4 = 0.75 -                     mul_5; 
+    TensorOutput_sub_5_T sub_5 = 1.5 -                     abs_2; 
+    TensorOutput_mul_6_T mul_6 = 0.5 *                     sub_5; 
+    TensorOutput_mul_7_T mul_7 = mul_6 *                     sub_5; 
+    TensorOutput_lt_1_T lt_1 = abs_2 < 0.5; 
+    TensorOutput_where_1_T where_1 =                     _where(lt_1, sub_4, mul_7); 
+    TensorOutput_mul_8_T mul_8 = where *                     where_1; 
+    TensorOutput_getitem_4_T getitem_4(mul_8); 
+    TensorOutput_clone_4_T clone_4(getitem_4); 
+    TensorOutput_gt_T gt = select_source_1 > 0.0; 
+    TensorOutput_where_2_T where_2 =                     _where(gt, clone_4, clone_4); 
+    TensorOutput_mul_9_T mul_9 = select_source_1 *                     where_2; 
+    return mul_9; 
+        }
+
+
 
         //---------------------------------------------------------------------
         // Tile processing
@@ -233,8 +317,8 @@ namespace merged
                 OffsetT(threadIdx.x * ITEMS_PER_THREAD), // Diagonal
                 s_tile_row_end_offsets,                  // List A
                 tile_nonzero_indices,                    // List B
-                tile_num_rows,
-                tile_num_nonzeros,
+                static_cast<OffsetT>(tile_num_rows),
+                static_cast<OffsetT>(tile_num_nonzeros),
                 thread_start_coord);
 
             CTA_SYNC(); // Perf-sync
@@ -251,7 +335,10 @@ namespace merged
             int tile_num_rows,                  ///< [in] Number of rows in the merge tile
             int tile_num_nonzeros,               ///< [in] Number of non-zeros in the merge tile
             ValueT *output_vector_y,             ///< [out] Output vector y
-            typename BlockScanT::TempStorage &scan_storage ///< [in] Scan storage for BlockScanT operations
+            typename BlockScanT::TempStorage &scan_storage, ///< [in] Scan storage for BlockScanT operations
+            int tile_idx,                        ///< [in] Merge tile index
+            int num_merge_tiles,                 ///< [in] Carry-buffer stride
+            int carry_lane_offset                ///< [in] First lane for this reducer
         )
         {
             typedef TensorKey<OffsetT, ValueT, DimReducer> TensorKeyT;
@@ -262,7 +349,7 @@ namespace merged
             CountingInputIterator<OffsetT> tile_nonzero_indices(tile_start_coord.y);
 
             OffsetT row_end_offset = s_tile_row_end_offsets[thread_current_coord.x];
-            TensorT nonzero = s_tile_value_nonzeros[thread_current_coord.y];
+
 
 // Reduce
 #pragma unroll
@@ -271,10 +358,14 @@ namespace merged
                 if (tile_nonzero_indices[thread_current_coord.y] < row_end_offset)
                 {
 // Move down (accumulate)
+                    TensorT nonzero = evaluate_reducer_nonzero(
+                        tile_start_coord.y + thread_current_coord.y,
+                        tile_start_coord.x + thread_current_coord.x);
+
                     scan_segment[ITEM].set(nonzero.values);
                     running_total = running_total + nonzero;
                     ++thread_current_coord.y;
-                    nonzero = s_tile_value_nonzeros[thread_current_coord.y];
+
                 }
                 else
                 {
@@ -336,37 +427,38 @@ namespace merged
 
                 CTA_SYNC();
 
-// memory coalescing for writing the output vector y
+// Every row boundary is owned by exactly one merge tile.  Initialize that
+// completed-row suffix directly; a later carry-only kernel adds prefixes from
+// preceding tiles for rows that cross tile boundaries.
 #pragma unroll 1
                 for (int item = threadIdx.x; item < tile_num_rows; item += BLOCK_THREADS)
                 {
                     #pragma unroll
                     for (int i = 0; i < DimReducer; i++)
                     {
-                        atomicAdd(
-                            &output_vector_y[(tile_start_coord.x + item) * DimReducer + i],
-                            s_partials[item].values[i]
-                        );
+                        output_vector_y[
+                            (tile_start_coord.x + item) * DimReducer + i
+                        ] = s_partials[item].values[i];
                     }
                 }
             }
 
             CTA_SYNC();
 
-            // atomic add the residual sum, the tile's carry-out, to the Global memory
+            // Save one residual vector per tile.  Keeping carries separate
+            // removes the full reducer-output zero pass and confines atomics
+            // to the compact tile-carry stream instead of every completed row.
             if (threadIdx.x == 0)
             {
                 tile_carry.key += tile_start_coord.x;
-                if (tile_carry.key < spmv_params.num_rows)
+                spmv_params.d_tile_carry_keys[tile_idx] = tile_carry.key;
+                #pragma unroll
+                for (int i = 0; i < DimReducer; i++)
                 {
-                    #pragma unroll
-                    for (int i = 0; i < DimReducer; i++)
-                    {
-                        atomicAdd(
-                            &output_vector_y[tile_carry.key * DimReducer + i],
-                            tile_carry.values[i]);
-                    }
-                };
+                    spmv_params.d_tile_carry_values[
+                        (carry_lane_offset + i) * num_merge_tiles + tile_idx
+                    ] = tile_carry.values[i];
+                }
             }
         }
 
@@ -375,6 +467,7 @@ namespace merged
          */
         __device__ __forceinline__ void ConsumeTile(
             int tile_idx,
+            int num_merge_tiles,
             CoordinateT tile_start_coord,
             CoordinateT tile_end_coord,
             Int2Type<true> is_direct_load) ///< Marker type indicating whether to load nonzeros directly during path-discovery or beforehand in batch
@@ -382,56 +475,36 @@ namespace merged
             int tile_num_rows = tile_end_coord.x - tile_start_coord.x;
             int tile_num_nonzeros = tile_end_coord.y - tile_start_coord.y;
 
-            
-
-// Select
-// Gather the nonzeros for the merge tile into shared memory
-#pragma unroll
-            for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
-            {
-                int nonzero_idx = threadIdx.x + (ITEM * BLOCK_THREADS);
-
-                if (nonzero_idx < tile_num_nonzeros)
-                {
-                    // [code generation]
-                        VectorValueIteratorT truediv_2_ptr_current = truediv_2_ptr +                         (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_truediv_2_T truediv_2(truediv_2_ptr_current); 
-    VectorValueIteratorT truediv_7_ptr_current = truediv_7_ptr +                         (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_truediv_7_T truediv_7(truediv_7_ptr_current); 
-    VectorValueIteratorT truediv_12_ptr_current = truediv_12_ptr +                         (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_truediv_12_T truediv_12(truediv_12_ptr_current); 
-    VectorValueIteratorT scatter_9_ptr_current = scatter_9_ptr +                         (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_scatter_9_T scatter_9(scatter_9_ptr_current); 
-    VectorValueIteratorT area_ptr_current = area_ptr +                         (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_area_T area(area_ptr_current); 
-    VectorValueIteratorT h_ptr_current = h_ptr +                         (tile_start_coord.y + nonzero_idx) * 1; 
-    TensorInput_h_T h(h_ptr_current); 
+            loading_offsets(tile_num_rows, tile_start_coord);
 
 
-                    // map
-                        TensorOutput_neg_9_T neg_9 = -scatter_9; 
-    TensorOutput_truediv_17_T truediv_17 = neg_9 /                     area; 
-    TensorOutput_add_49_T add_49 = truediv_2 +                     truediv_7; 
-    TensorOutput_add_50_T add_50 = add_49 +                     truediv_12; 
-    TensorOutput_add_51_T add_51 = add_50 +                     truediv_17; 
-    TensorOutput_mul_85_T mul_85 = 5.5555e-05 *                     add_51; 
-h = h +                     mul_85; 
-  #pragma unroll 
-  for (int i = 0; i < 1; i++) 
-  { 
-    spmv_params.h_ptr[                (tile_start_coord.y + nonzero_idx) * 1 + i] =                     h.values[i]; 
-  } 
 
-
-                    //output for map
-                    
-                }
-            }
-
-            CTA_SYNC();
-
+            // reduce the intermeidate computations 
+            // all reducers share the same row end offsets 
+            // Search for the thread's starting coordinate within the merge tile 
+            CoordinateT thread_start_coord; 
+            search_thread_start_coord( 
+                temp_storage.s_tile_row_end_offsets, 
+                tile_start_coord, 
+                tile_num_rows, 
+                tile_num_nonzeros, 
+                thread_start_coord); 
             // [code generation]
-            
+               reduce<4, BlockScan_reduce_receiver_T, TensorOutput_reduce_receiver_T,                 ReduceBySegmentOp_reduce_receiver_T>( 
+                temp_storage.smem_reduce_receiver.s_tile_value_reducer,                          ///< [in, code gen] Shared memory array of non-zero values for the merge tile 
+                temp_storage.s_tile_row_end_offsets,                         ///< [in, code gen] Shared memory array of row end offsets for the merge tile 
+                tile_start_coord,                               ///< [in] Starting coordinate of the merge tile 
+                tile_end_coord,                                 ///< [in] Ending coordinate of the merge tile 
+                thread_start_coord,                             ///< [in] Starting coordinate of the thread 
+                tile_num_rows,                                  ///< [in] Number of rows in the merge tile 
+                tile_num_nonzeros,                               ///< [in] Number of non-zeros in the merge tile 
+                spmv_params.output_y_reduce_receiver_ptr,                       ///< [out] Output vector y 
+                temp_storage.smem_reduce_receiver.scan,                        ///< [in] Scan storage for BlockScanT 
+                tile_idx, num_merge_tiles,                             ///< [in] Tile identity and carry-buffer stride 
+                0                             ///< [in] First carry lane for this reducer 
+            ); 
+   CTA_SYNC(); 
+
         }
 
 
@@ -448,13 +521,39 @@ h = h +                     mul_85;
 
             if (tile_idx >= num_merge_tiles)
                 return;
-
-            // just padding parameters here 
-            CoordinateT tile_start_coord = {-1, tile_idx * TILE_ITEMS};
-            CoordinateT tile_end_coord = {-1, min(tile_idx * TILE_ITEMS + TILE_ITEMS, spmv_params.num_nonzeros)};
+                
+            // Read our starting coordinates 
+            if (threadIdx.x < 2) 
+            { 
+                if (d_tile_coordinates == NULL) 
+                {
+                    // Search our starting coordinates 
+                    OffsetT diagonal = (tile_idx + threadIdx.x) * TILE_ITEMS; 
+                    CoordinateT tile_coord; 
+                    CountingInputIterator<OffsetT> nonzero_indices(0); 
+    
+                    // Search the merge path 
+                    MergePathSearch( 
+                        diagonal, 
+                        RowOffsetsSearchIteratorT(spmv_params.d_row_end_offsets), 
+                        nonzero_indices, 
+                        spmv_params.num_rows, 
+                        spmv_params.num_nonzeros, 
+                        tile_coord); 
+                    temp_storage.tile_coords[threadIdx.x] = tile_coord; 
+                } 
+                else 
+                { 
+                    temp_storage.tile_coords[threadIdx.x] = d_tile_coordinates[tile_idx + threadIdx.x]; 
+                } 
+            } 
+            CTA_SYNC(); 
+            CoordinateT tile_start_coord = temp_storage.tile_coords[0]; 
+            CoordinateT tile_end_coord = temp_storage.tile_coords[1]; 
 
             ConsumeTile(
                 tile_idx,
+                num_merge_tiles,
                 tile_start_coord,
                 tile_end_coord,
                 Int2Type<AgentSpmvPolicyT::DIRECT_LOAD_NONZEROS>()); // PTX >=520 use the indirect load of nonzeros

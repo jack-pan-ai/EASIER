@@ -279,17 +279,19 @@ template <
 struct FlexParams
 {
     // [code generation]
-      ValueT *truediv_2_ptr; 
-  ValueT *truediv_7_ptr; 
-  ValueT *truediv_12_ptr; 
-  ValueT *scatter_9_ptr; 
-  ValueT *area_ptr; 
-  ValueT *h_ptr; 
+      ValueT *particle_values_ptr; 
+  ValueT *receiver_centers_ptr; 
+  ValueT *positions_ptr; 
+  OffsetT *select_source_ptr; 
+  OffsetT *select_receiver_center_ptr; 
+  ValueT *output_y_reduce_receiver_ptr; 
 
-    int num_rows;                ///< Number of rows of matrix <b>A</b>.
-    int num_cols;                ///< Number of columns of matrix <b>A</b>.
-    int num_nonzeros;            ///< Number of nonzero elements of matrix <b>A</b>.
+    OffsetT num_rows;            ///< Number of rows of matrix <b>A</b>.
+    OffsetT num_cols;            ///< Number of columns of matrix <b>A</b>.
+    OffsetT num_nonzeros;        ///< Number of nonzero elements of matrix <b>A</b>.
     OffsetT *d_row_end_offsets;  /// only used for compilation for search kernel
+    OffsetT *d_tile_carry_keys;  ///< One residual row key per merge tile.
+    ValueT *d_tile_carry_values; ///< Structure-of-arrays residual values.
 };
 
 struct LaunchKernelConfig

@@ -153,7 +153,7 @@ def generate_cpu_binding_code(
         if _dispatch_input.get("dtype_data") == torch.int64:
             optional_long_case = (
                 "    case torch::kLong:\n"
-                f"      return merged_spmv_launch_cpu_typed<long, int>({function_call_args});\n"
+                f"      return merged_spmv_launch_cpu_index_dispatch<long>({function_call_args});\n"
             )
     except Exception:
         optional_long_case = ""
@@ -287,5 +287,4 @@ def generate_cpu_binding_code(
     with open(binding_path, "w") as f:
         f.write(binding_code)
     logger.info(f"CPU binding code generated successfully at {binding_path}!")
-
 

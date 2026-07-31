@@ -35,15 +35,29 @@ ${omp_call}
   ${output_tuple_returns}
 }
 
+template <typename ValueT>
+${tuple_type_return} merged_spmv_launch_cpu_index_dispatch(
+${function_params}
+) {
+  switch (row_end_offsets.scalar_type()) {
+    case torch::kInt:
+      return merged_spmv_launch_cpu_typed<ValueT, int>(${function_call_args});
+    case torch::kLong:
+      return merged_spmv_launch_cpu_typed<ValueT, int64_t>(${function_call_args});
+    default:
+      TORCH_CHECK(false, "Unsupported index dtype. Use int32 or int64.");
+  }
+}
+
 ${tuple_type_return} merged_spmv_launch_bind_cpu(
 ${function_params}
 ) {
   TORCH_CHECK(${dispatch_tensor}.device().is_cpu(), "CPU device required");
   switch (${dispatch_tensor}.scalar_type()) {
     case torch::kFloat:
-      return merged_spmv_launch_cpu_typed<float, int>(${function_call_args});
+      return merged_spmv_launch_cpu_index_dispatch<float>(${function_call_args});
     case torch::kDouble:
-      return merged_spmv_launch_cpu_typed<double, int>(${function_call_args});
+      return merged_spmv_launch_cpu_index_dispatch<double>(${function_call_args});
     ${optional_long_case}
     default:
       TORCH_CHECK(false, "Unsupported dtype for ValueT. Use float32 or float64.");
@@ -60,5 +74,4 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
 ${pybind_args}
   );
 }
-
 

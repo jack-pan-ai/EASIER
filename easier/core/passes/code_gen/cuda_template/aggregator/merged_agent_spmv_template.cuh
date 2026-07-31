@@ -208,8 +208,8 @@ namespace merged
                 OffsetT(threadIdx.x * ITEMS_PER_THREAD), // Diagonal
                 s_tile_row_end_offsets,                  // List A
                 tile_nonzero_indices,                    // List B
-                tile_num_rows,
-                tile_num_nonzeros,
+                static_cast<OffsetT>(tile_num_rows),
+                static_cast<OffsetT>(tile_num_nonzeros),
                 thread_start_coord);
 
             CTA_SYNC(); // Perf-sync
@@ -401,8 +401,14 @@ namespace merged
                 return;
 
             // just padding parameters here 
-            CoordinateT tile_start_coord = {-1, tile_idx * TILE_ITEMS};
-            CoordinateT tile_end_coord = {-1, min(tile_idx * TILE_ITEMS + TILE_ITEMS, spmv_params.num_nonzeros)};
+            CoordinateT tile_start_coord = {
+                static_cast<OffsetT>(-1),
+                static_cast<OffsetT>(tile_idx) * TILE_ITEMS};
+            CoordinateT tile_end_coord = {
+                static_cast<OffsetT>(-1),
+                (cub::min)(
+                    (static_cast<OffsetT>(tile_idx) + 1) * TILE_ITEMS,
+                    spmv_params.num_nonzeros)};
 
             ConsumeTile(
                 tile_idx,

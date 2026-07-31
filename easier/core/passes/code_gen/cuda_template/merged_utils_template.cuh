@@ -280,10 +280,12 @@ struct FlexParams
 {
     // [code generation]
     ${input_declarations_utils_code}
-    int num_rows;                ///< Number of rows of matrix <b>A</b>.
-    int num_cols;                ///< Number of columns of matrix <b>A</b>.
-    int num_nonzeros;            ///< Number of nonzero elements of matrix <b>A</b>.
+    OffsetT num_rows;            ///< Number of rows of matrix <b>A</b>.
+    OffsetT num_cols;            ///< Number of columns of matrix <b>A</b>.
+    OffsetT num_nonzeros;        ///< Number of nonzero elements of matrix <b>A</b>.
     OffsetT *d_row_end_offsets;  /// only used for compilation for search kernel
+    OffsetT *d_tile_carry_keys;  ///< One residual row key per merge tile.
+    ValueT *d_tile_carry_values; ///< Structure-of-arrays residual values.
 };
 
 struct LaunchKernelConfig

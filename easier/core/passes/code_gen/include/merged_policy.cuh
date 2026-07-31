@@ -5,6 +5,14 @@
 #include <cub/iterator/cache_modified_input_iterator.cuh>
 #include <cub/thread/thread_load.cuh>
 
+#ifndef EASIER_CUDA_F64_ITEMS_PER_THREAD
+#define EASIER_CUDA_F64_ITEMS_PER_THREAD 6
+#endif
+#if (EASIER_CUDA_F64_ITEMS_PER_THREAD < 1) || \
+    (EASIER_CUDA_F64_ITEMS_PER_THREAD > 16)
+#error "EASIER_CUDA_F64_ITEMS_PER_THREAD must be between 1 and 16"
+#endif
+
 /**
  * Parameterizable tuning policy type for AgentSegmentFixup
  */
@@ -86,10 +94,44 @@ namespace merged
             SegmentFixupPolicyT;
     };
 
+    /// SM90: H100 FP64 tuning retains 64 threads and permits a validated
+    /// build-time merge-tile depth. FP32 retains the established SM60 policy.
+    template <typename ValueT>
+    struct Policy900
+    {
+        typedef AgentSpmvPolicy<
+            (sizeof(ValueT) > 4) ? 64 : 128,
+            (sizeof(ValueT) > 4) ? EASIER_CUDA_F64_ITEMS_PER_THREAD : 7,
+            cub::LOAD_DEFAULT,
+            cub::LOAD_DEFAULT,
+            cub::LOAD_DEFAULT,
+            cub::LOAD_DEFAULT,
+            cub::LOAD_DEFAULT,
+            true, // DIRECT_LOAD_NONZEROS
+            cub::BLOCK_SCAN_WARP_SCANS>
+            SpmvPolicyT;
+
+        typedef AgentSegmentFixupPolicy<
+            128,
+            3,
+            cub::BLOCK_LOAD_DIRECT,
+            cub::LOAD_LDG,
+            cub::BLOCK_SCAN_WARP_SCANS>
+            SegmentFixupPolicyT;
+    };
+
 } // namespace merged
 
-// Define the policy to use based on architecture
-#if (CUB_PTX_ARCH >= 600)
+// Define the policy from a build target that is identical in nvcc host and
+// device passes.  CUB_PTX_ARCH is intentionally not used here: CUB documents
+// its host-pass value as implementation-defined, and nvcc reports zero.
+#ifndef EASIER_CUDA_TARGET_ARCH
+#error "EASIER_CUDA_TARGET_ARCH must be supplied by the CUDA extension builder"
+#endif
+#if (EASIER_CUDA_TARGET_ARCH >= 900)
+    template <typename ValueT>
+    using PtxPolicy = merged::Policy900<ValueT>;
+#elif (EASIER_CUDA_TARGET_ARCH >= 600)
     template <typename ValueT>
     using PtxPolicy = merged::Policy600<ValueT>;
 #else

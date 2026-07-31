@@ -1,6 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+import os
 from typing import Callable, Dict, Final, List, Tuple, TypeVar, cast, Optional
 
 import torch
@@ -1078,6 +1079,9 @@ class JitEngine:
         self.graph = graph
 
         self.run_count = 0
+        self._cuda_graph = None
+        self._cuda_graph_capture_attempted = False
+        self._cuda_graph_static_tensors = ()
 
         # ======
         # Fields for Handlers to setup
@@ -1096,6 +1100,62 @@ class JitEngine:
         # i.e. not used, or, isn't an attribute at all.
         self.read_tensors: OrderedSet[esr.Tensor]
         self.write_tensors: OrderedSet[esr.Tensor]
+
+    def _cuda_graph_replay_requested(self) -> bool:
+        value = os.getenv("EASIER_CUDA_GRAPH_MODULE_REPLAY", "0")
+        return value.strip().lower() in ("1", "true", "yes", "on")
+
+    def _can_capture_cuda_graph(self) -> bool:
+        """Return whether this compiled Module is safe for static replay.
+
+        EASIER Modules take their runtime values from stable module attributes
+        rather than call arguments.  After the first JIT run, a single-rank
+        CUDA module with no communication primitive therefore has a static
+        pointer topology suitable for CUDA Graph replay.  Communication is
+        excluded conservatively; multi-rank capture needs a separate NCCL
+        lifecycle contract.
+        """
+        if not self._cuda_graph_replay_requested():
+            return False
+        # The first call traces and compiles.  Run the compiled wrappers once
+        # more before capture so lazy temp buffers and cached merge coordinates
+        # are initialized outside the graph.  Otherwise their one-time search
+        # and allocation path would be replayed forever.
+        if self.run_count < 2 or self._cuda_graph_capture_attempted:
+            return False
+        if getattr(self.module, "easier_jit_backend", None) != "cuda":
+            return False
+        if getattr(self, "called_comm_primitive", True):
+            return False
+        dist_env = get_runtime_dist_env()
+        return (
+            dist_env.world_size == 1
+            and dist_env.comm_device.type == "cuda"
+            and torch.cuda.is_available()
+        )
+
+    def _capture_cuda_graph(self) -> None:
+        """Capture one already-compiled Module invocation for later replay."""
+        self._cuda_graph_capture_attempted = True
+        # Keep all user-visible EASIER tensor storages alive for the complete
+        # graph lifetime.  CUDA's graph-private allocator retains transient
+        # extension outputs allocated during capture.
+        self._cuda_graph_static_tensors = tuple(
+            tensor.data for tensor in get_easier_tensors([self.module])
+        )
+        torch.cuda.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            self._execute_once()
+        self._cuda_graph = graph
+        # Stream capture records work but does not execute it.  Replay once so
+        # the invocation that triggered capture has exactly the same observable
+        # effect as an ordinary Module call.
+        graph.replay()
+        esr.logger.info(
+            "Captured static CUDA Graph replay for %s",
+            getattr(self.module, "easier_hint_name", type(self.module).__name__),
+        )
 
     def create_first_run_handlers(self, stackframe: Dict[Node, RuntimeValue]):
         first_run_handlers: List[NodeHandlerBase] = [
@@ -1189,7 +1249,7 @@ class JitEngine:
 
         [self.module], [self.graph] = ms, gs
 
-    def forward(self):
+    def _execute_once(self):
         """
         Run registered Handlers before and after evaluating each Node:
         -   preprocess() are run in sequence,
@@ -1258,6 +1318,16 @@ class JitEngine:
         # JitEngine.forward() serves as esr.Module.forward(), and is required
         # to return None.
         return None
+
+    def forward(self):
+        if self._cuda_graph is not None:
+            self._cuda_graph.replay()
+            self.run_count += 1
+            return None
+        if self._can_capture_cuda_graph():
+            self._capture_cuda_graph()
+            return None
+        return self._execute_once()
 
 
 class BackendNoneEngine:

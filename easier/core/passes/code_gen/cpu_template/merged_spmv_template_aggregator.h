@@ -19,9 +19,9 @@ template <typename OffsetT> struct CountingInputIterator {
   inline OffsetT operator[](OffsetT idx) const { return start + idx; }
 };
 
-struct int2 {
-  int x;
-  int y;
+template <typename OffsetT> struct OffsetCoordinate {
+  OffsetT x;
+  OffsetT y;
 };
 
 /**
@@ -38,7 +38,7 @@ inline void MergePathSearch(
     CoordinateT &path_coordinate) ///< [out] (x,y) coordinate where diagonal
                                   ///< intersects the merge path
 {
-  OffsetT x_min = std::max(diagonal - b_len, 0);
+  OffsetT x_min = std::max(diagonal - b_len, OffsetT{0});
   OffsetT x_max = std::min(diagonal, a_len);
 
   while (x_min < x_max) {
@@ -130,11 +130,12 @@ void OmpMergeSystem(
     // Find starting and ending MergePath coordinates (row-idx, nonzero-idx) for
     // [code generation]
     // Merge list B (NZ indices)
-    int2 thread_coord;
-    int2 thread_coord_end;
-    thread_coord.y = tid * items_per_thread;
+    OffsetCoordinate<OffsetT> thread_coord{};
+    OffsetCoordinate<OffsetT> thread_coord_end{};
+    thread_coord.y = static_cast<OffsetT>(tid) * items_per_thread;
     thread_coord_end.y =
-        std::min(tid * items_per_thread + items_per_thread, num_nonzeros);
+        std::min(thread_coord.y + items_per_thread,
+                 static_cast<OffsetT>(num_nonzeros));
 
     // Consume whole rows
     ${aggregator_consume_private_tmp}

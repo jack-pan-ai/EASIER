@@ -1180,6 +1180,15 @@ def unbalanced_compute_heartbeat(compute_hint: str = ""):
     print(result)   # use result that's different on each worker
     ```
     """
+    # A heartbeat exists only to keep multiple workers in the same sequence
+    # of collectives.  Starting a polling thread (and performing collectives)
+    # for the single-rank case adds latency and, more importantly for very
+    # large sparse graphs, keeps temporary tensors alive across the context.
+    # Do not involve the distributed runtime at all when there is no peer.
+    if get_default_dist_env().world_size == 1:
+        yield
+        return
+
     import threading
     import time
 

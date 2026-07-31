@@ -2,12 +2,14 @@
 # Licensed under the MIT License.
 
 import itertools
+import os
 from typing import Dict, List, Sequence, Tuple, Union
 
 
 import torch
 from torch.fx.graph import Graph
-from easier.core.passes.tensor_group_partition import ElemPart
+from easier.core.passes.tensor_group_partition import \
+    ElemPart, ElemPartArangeIdx
 
 from easier.core.runtime.dist_env import \
     get_runtime_dist_env, unbalanced_compute_heartbeat
@@ -23,7 +25,33 @@ from easier.core.passes.sparse_encoding.utils import \
     reorder_elempart, sort_elempart
 from easier.core.passes.utils import \
     EasierInterpreter, vector_index_of, zipsort_using_order, \
+    get_selector_reducer_idx_partition, \
     get_selector_reducer_idx_partition_pair, get_selectors_reducers
+
+
+def _single_rank_fast_path_enabled() -> bool:
+    """Whether local sparse encoding may omit all distributed bookkeeping."""
+    value = os.getenv("EASIER_SINGLE_RANK_FAST_PATH", "1").strip().lower()
+    return get_runtime_dist_env().world_size == 1 and value not in {
+        "0", "false", "no", "off"
+    }
+
+
+def _single_rank_runtime_halos(elempart: ElemPart):
+    """Runtime halo metadata for a graph that has no remote rank."""
+    empty = torch.empty((0,), dtype=torch.int64)
+    return [empty], [int(elempart.idx.shape[0])]
+
+
+def _local_index_in_elempart(
+    global_idx: torch.Tensor, elempart: ElemPart
+) -> torch.Tensor:
+    """Map global IDs to local IDs without sorting a contiguous ElemPart."""
+    if isinstance(elempart.idx_desc, ElemPartArangeIdx):
+        if elempart.idx_desc.start == 0:
+            return global_idx
+        return global_idx - elempart.idx_desc.start
+    return vector_index_of(global_idx, elempart.idx)
 
 
 def calculate_paired_in_out_idx(
@@ -73,6 +101,13 @@ def calculate_paired_in_out_idx(
         elements of potentially halos to this worker.
     """
     dist_env = get_runtime_dist_env()
+
+    if _single_rank_fast_path_enabled():
+        # Rank zero owns every pair.  Returning the existing tensors avoids
+        # two boolean-index copies, two device transfers, all-to-all buffers,
+        # and two concatenations of the complete relation.
+        assert input_gidx_part.shape[0] == output_gidx_part.shape[0]
+        return input_gidx_part, output_gidx_part
 
     input_gidxes_to_others = []
     output_gidxes_on_others = []
@@ -158,6 +193,13 @@ def calculate_halo_info(
         the element order of `input_elempart`.
     """
     dist_env = get_runtime_dist_env()
+
+    if _single_rank_fast_path_enabled():
+        # HaloExchanger ignores the local local-index list.  It concatenates
+        # the complete local input directly, so neither unique/isin nor an
+        # edge-sized local-index tensor is needed.
+        empty = torch.empty((0,), dtype=torch.int64)
+        return [input_elempart.idx], [empty]
 
     halo_lidxes_to_this = []
     halo_gidxes_to_this = []
@@ -278,6 +320,28 @@ def reorder_input_by_reducer(
     """
     dist_env = get_runtime_dist_env()
 
+    if _single_rank_fast_path_enabled() and isinstance(
+        output_elempart.idx_desc, ElemPartArangeIdx
+    ):
+        # Reducer input global IDs are the implicit range paired with its idx.
+        # With one rank that range begins at zero, and the stable-sort
+        # permutation is itself the reordered input edge ID.  Avoid building
+        # an edge-sized arange and then indexing it to create the same tensor.
+        output_gidx_on_this, (input_start, _input_end) = \
+            get_selector_reducer_idx_partition(reducer)
+        reordered_output_gidx_on_this, pos = torch.sort(
+            output_gidx_on_this, stable=True
+        )
+        if input_start == 0:
+            reordered_input_gidx_to_this = pos
+        else:
+            reordered_input_gidx_to_this = pos + input_start
+        reducer._easier_single_rank_relations_aligned = True
+        return (
+            reordered_input_gidx_to_this,
+            reordered_output_gidx_on_this,
+        ), reordered_input_gidx_to_this
+
     input_idx_part, output_idx_part = \
         get_selector_reducer_idx_partition_pair(reducer)
     input_gidx_to_this, output_gidx_on_this = calculate_paired_in_out_idx(
@@ -285,6 +349,23 @@ def reorder_input_by_reducer(
         output_idx_part,
         sort_elempart(output_elempart)  # element order doesn't matter
     )
+
+    if _single_rank_fast_path_enabled():
+        # The only rank owns every input edge.  A single stable receiver sort
+        # is sufficient to form the CSR-like order used by generated code.
+        # Return the already aligned relation so rewrite_reducer_instance does
+        # not repeat the same edge-sized zipsort and inverse lookup.
+        reordered_output_gidx_on_this, \
+            reordered_input_gidx_to_this, _pos = zipsort_using_order(
+                order=output_elempart.idx,
+                to_sort=output_gidx_on_this,
+                to_follow=input_gidx_to_this,
+            )
+        reducer._easier_single_rank_relations_aligned = True
+        return (
+            reordered_input_gidx_to_this,
+            reordered_output_gidx_on_this,
+        ), reordered_input_gidx_to_this
 
     # may be not full
     assert \
@@ -378,6 +459,28 @@ def rewrite_selector_instance(
     input_elempart: ElemPart,
     output_elempart: ElemPart
 ):
+    if _single_rank_fast_path_enabled():
+        # Selector's related output IDs are the contiguous range belonging to
+        # its loaded idx partition.  The output ElemPart is precisely the
+        # desired edge order, so direct indexing replaces a five-array
+        # zipsort followed by another global-ID lookup.
+        assert selector.easier_idx_part_range is not None
+        output_start, output_end = selector.easier_idx_part_range
+        assert output_elempart.idx.shape[0] == output_end - output_start
+        positions = (
+            output_elempart.idx if output_start == 0
+            else output_elempart.idx - output_start
+        )
+        reordered_input_gidx = input_gidx_to_this[positions]
+        selector.idx = _local_index_in_elempart(
+            reordered_input_gidx, input_elempart
+        )
+        selector.easier_index_status = 'rewritten'
+        local_idxes, recv_lengths = _single_rank_runtime_halos(input_elempart)
+        selector.runtime_halos_local_idxes = local_idxes
+        selector.runtime_halos_recv_lengths = recv_lengths
+        return
+
     halo_gidxes_to_this, halo_lidxes_to_others = calculate_halo_info(
         input_gidx_to_this, input_elempart
     )
@@ -427,6 +530,24 @@ def rewrite_reducer_instance(
     input_elempart: ElemPart,
     output_elempart: ElemPart
 ):
+    if _single_rank_fast_path_enabled() and getattr(
+        reducer, "_easier_single_rank_relations_aligned", False
+    ):
+        # reorder_input_by_reducer already produced relation order identical
+        # to the reordered input TensorGroup.  Generated execution therefore
+        # needs no auxiliary reordering Selector.
+        reducer.idx = _local_index_in_elempart(
+            output_gidx_on_this, output_elempart
+        )
+        reducer.easier_reordering_selector_idx = None
+        reducer.easier_index_status = 'rewritten'
+        reducer.n = output_elempart.idx.shape[0]
+        local_idxes, recv_lengths = _single_rank_runtime_halos(input_elempart)
+        reducer.runtime_halos_local_idxes = local_idxes
+        reducer.runtime_halos_recv_lengths = recv_lengths
+        delattr(reducer, "_easier_single_rank_relations_aligned")
+        return
+
     halo_gidxes_to_this, halo_lidxes_to_others = calculate_halo_info(
         input_gidx_to_this, input_elempart
     )
@@ -516,15 +637,75 @@ class IdxMover(EasierInterpreter):
         super().__init__(modules, graphs)
 
         self.runtime_device = get_runtime_dist_env().comm_device
+        self._moved_shared_idx: Dict[int, torch.Tensor] = {}
 
     def if_call_module(self, submod: torch.nn.Module):
         if isinstance(submod, (esr.Selector, esr.Reducer)):
-            submod.idx = submod.idx.to(self.runtime_device)
+            # Multiple sparse operators may intentionally share one exactly
+            # deduplicated CPU index.  Cache by object identity so moving the
+            # first one to CUDA does not create another device copy when the
+            # second operator is visited.
+            source_id = id(submod.idx)
+            moved = self._moved_shared_idx.get(source_id)
+            if moved is None:
+                moved = submod.idx.to(self.runtime_device)
+                self._moved_shared_idx[source_id] = moved
+            submod.idx = moved
 
             # HaloExchanger stores this List, so changing item of list can be
             # seen there, to match runtime devices for input and index.
             for i, t in enumerate(submod.runtime_halos_local_idxes):
                 submod.runtime_halos_local_idxes[i] = t.to(self.runtime_device)
+
+
+def deduplicate_shared_loader_indexes(
+    modules: Sequence[esr.Module], graphs: Sequence[Graph]
+) -> None:
+    """Share rewritten indexes only when provenance and values both match."""
+    if not _single_rank_fast_path_enabled():
+        return
+
+    def provenance_key(loader):
+        # Module.to() clones DataLoaders, so object identity alone does not
+        # preserve the fact that two HDF5 loaders name the same dataset.
+        # Use only immutable source metadata here; torch.equal below remains
+        # the final safety condition before sharing.
+        if hasattr(loader, "_file_path") and hasattr(loader, "_dataset_path"):
+            return (
+                "hdf5",
+                os.path.realpath(os.path.expanduser(loader._file_path)),
+                loader._dataset_path,
+                str(loader.dtype),
+                str(loader.device),
+                repr(sorted(getattr(loader, "_file_kwargs", {}).items())),
+            )
+        return ("object", id(loader))
+
+    canonical_by_loader: Dict[object, torch.Tensor] = {}
+    saved_bytes = 0
+    deduplicated = 0
+    for submod in get_selectors_reducers(modules, graphs):
+        loader_key = provenance_key(submod.easier_data_loader)
+        canonical = canonical_by_loader.get(loader_key)
+        if canonical is None:
+            canonical_by_loader[loader_key] = submod.idx
+            continue
+        if (
+            canonical.shape == submod.idx.shape
+            and canonical.dtype == submod.idx.dtype
+            and torch.equal(canonical, submod.idx)
+        ):
+            saved_bytes += submod.idx.numel() * submod.idx.element_size()
+            submod.idx = canonical
+            deduplicated += 1
+
+    if deduplicated:
+        logger.info(
+            "Single-rank sparse index deduplication shared %d tensor(s), "
+            "eliminating %.3f GiB per runtime device",
+            deduplicated,
+            saved_bytes / (1 << 30),
+        )
 
 
 def encode_sparsity(modules: List[esr.Module], graphs: List[Graph]):
@@ -601,16 +782,28 @@ def encode_sparsity(modules: List[esr.Module], graphs: List[Graph]):
             (df_in_grp, df_out_grp) = _rel[1]
 
             df_output_elempart = elemparts[df_out_grp]
-            input_idx_part, output_idx_part = \
-                get_selector_reducer_idx_partition_pair(submod)
+            if _single_rank_fast_path_enabled() and isinstance(
+                submod, esr.Selector
+            ):
+                # A Selector's output relation is an implicit arange.  The
+                # single-rank rewrite uses the stored partition range, so do
+                # not materialize another full-edge int64 array here.
+                input_gidx_to_this, _ = \
+                    get_selector_reducer_idx_partition(submod)
+                output_gidx_on_this = torch.empty(
+                    (0,), dtype=input_gidx_to_this.dtype
+                )
+            else:
+                input_idx_part, output_idx_part = \
+                    get_selector_reducer_idx_partition_pair(submod)
 
-            (input_gidx_to_this, output_gidx_on_this) = \
-                calculate_paired_in_out_idx(
-                    input_idx_part,
-                    output_idx_part,
-                    sort_elempart(df_output_elempart)
-                    # TODO cache the sorted
-            )
+                (input_gidx_to_this, output_gidx_on_this) = \
+                    calculate_paired_in_out_idx(
+                        input_idx_part,
+                        output_idx_part,
+                        sort_elempart(df_output_elempart)
+                        # TODO cache the sorted
+                )
 
         logger.debug(f"Rewrite {submod.easier_hint_name}")
 
@@ -633,6 +826,7 @@ def encode_sparsity(modules: List[esr.Module], graphs: List[Graph]):
         else:
             assert False, "Must be a Selector or Reducer"
 
+    deduplicate_shared_loader_indexes(modules, graphs)
     IdxMover(modules, graphs).run()
 
     log_rewrite_statistics(modules, graphs)

@@ -20,9 +20,9 @@ template <typename OffsetT> struct CountingInputIterator {
   inline OffsetT operator[](OffsetT idx) const { return start + idx; }
 };
 
-struct int2 {
-  int x;
-  int y;
+template <typename OffsetT> struct OffsetCoordinate {
+  OffsetT x;
+  OffsetT y;
 };
 
 /**
@@ -39,7 +39,7 @@ inline void MergePathSearch(
     CoordinateT &path_coordinate) ///< [out] (x,y) coordinate where diagonal
                                   ///< intersects the merge path
 {
-  OffsetT x_min = std::max(diagonal - b_len, 0);
+  OffsetT x_min = std::max(diagonal - b_len, OffsetT{0});
   OffsetT x_max = std::min(diagonal, a_len);
 
   while (x_min < x_max) {
@@ -116,15 +116,18 @@ void OmpMergeSystem(
     // [code generation]
     // Merge list B (NZ indices)
     CountingInputIterator<OffsetT> nonzero_indices(0);
-    int2 thread_coord;
-    int2 thread_coord_end;
-    int start_diagonal = std::min(items_per_thread * tid, num_merge_items);
-    int end_diagonal =
+    OffsetCoordinate<OffsetT> thread_coord;
+    OffsetCoordinate<OffsetT> thread_coord_end;
+    OffsetT start_diagonal =
+        std::min(items_per_thread * static_cast<OffsetT>(tid), num_merge_items);
+    OffsetT end_diagonal =
         std::min(start_diagonal + items_per_thread, num_merge_items);
-    MergePathSearch(start_diagonal, row_end_offsets, nonzero_indices, num_rows,
-                    num_nonzeros, thread_coord);
-    MergePathSearch(end_diagonal, row_end_offsets, nonzero_indices, num_rows,
-                    num_nonzeros, thread_coord_end);
+    MergePathSearch(start_diagonal, row_end_offsets, nonzero_indices,
+                    static_cast<OffsetT>(num_rows),
+                    static_cast<OffsetT>(num_nonzeros), thread_coord);
+    MergePathSearch(end_diagonal, row_end_offsets, nonzero_indices,
+                    static_cast<OffsetT>(num_rows),
+                    static_cast<OffsetT>(num_nonzeros), thread_coord_end);
 
     // Consume whole rows
     for (; thread_coord.x < thread_coord_end.x; ++thread_coord.x) {

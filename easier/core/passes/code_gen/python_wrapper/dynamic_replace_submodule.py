@@ -1,11 +1,30 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+import os
+
 import torch
 import torch.nn as nn
 from typing import List, Tuple, Dict, Optional, Iterable
 
 from easier.core.module import Selector, Reducer
+
+
+def _codegen_index_dtype() -> torch.dtype:
+    """Return the opt-in generated-kernel index dtype.
+
+    int32 remains the production default.  The int64 option is used by the
+    controlled CASK index-width study and must be paired with a fresh JIT
+    build because it changes the extension ABI.
+    """
+    value = os.environ.get("EASIER_CODEGEN_INDEX_DTYPE", "int32")
+    if value == "int32":
+        return torch.int32
+    if value == "int64":
+        return torch.int64
+    raise RuntimeError(
+        "EASIER_CODEGEN_INDEX_DTYPE must be exactly 'int32' or 'int64'"
+    )
 
 def get_submodules_wrapper(
     submodule: nn.Module, 
@@ -139,25 +158,24 @@ class _DynamicCudaWrapper(nn.Module):
         gather_value_inputs: List[str],
         selector_idx_tensors: List[torch.Tensor],
         row_end_offsets: torch.Tensor,
+        forwarded_output_count: int = 0,
     ) -> None:
         super().__init__()
-        # Cast and register selector indices as buffers (int32)
+        index_dtype = _codegen_index_dtype()
+        # Cast and register all generated-kernel indices with one ABI dtype.
         buf_names: List[str] = []
         for i, t in enumerate(selector_idx_tensors):
             t = t.contiguous()
-            # [TODO:] Currently, the selector indices are always int32, \
-            # so we don't need to check the dtype, othewise we could \
-            # set to int64 if needed
-            if t.dtype != torch.int32:
-                t = t.to(torch.int32)
+            if t.dtype != index_dtype:
+                t = t.to(index_dtype)
             buf_name = f"selector_{i}_idx"
             self.register_buffer(buf_name, t, persistent=False)
             buf_names.append(buf_name)
-        # CSR row_end_offsets as int32 buffer
+        # CSR offsets must share the selector-index ABI dtype.
         if row_end_offsets is not None:
             reo = row_end_offsets.contiguous()
-            if reo.dtype != torch.int32:
-                reo = reo.to(torch.int32)
+            if reo.dtype != index_dtype:
+                reo = reo.to(index_dtype)
         else:
             reo = None
         self.register_buffer("row_end_offsets", reo, persistent=False)
@@ -167,15 +185,37 @@ class _DynamicCudaWrapper(nn.Module):
         self._non_gather_value_inputs = list(non_gather_value_inputs)
         self._gather_value_inputs = list(gather_value_inputs)
         self._selector_buf_names = buf_names
+        self._index_dtype = index_dtype
+        self._forwarded_output_count = forwarded_output_count
+        # Map-only regions still use the common extension ABI, which expects a
+        # row-offset tensor even though the kernel ignores it.  Allocate that
+        # sentinel once so steady-state calls—and CUDA Graph capture—perform
+        # no device allocation in the Python wrapper.
+        self.register_buffer(
+            "fake_row_end_offsets",
+            torch.tensor([42], dtype=index_dtype),
+            persistent=False,
+        )
         # temp storage buffer: defer alloc like bench wrapper (None until first call)
         self.register_buffer("temp_storage", None, persistent=False)
         # self.temp_storage = None
 
     def __call__(self, *args):
+        expected_args = (
+            len(self._input_param_names) + self._forwarded_output_count
+        )
+        if len(args) != expected_args:
+            raise RuntimeError(
+                f"generated kernel expected {expected_args} arguments, "
+                f"but received {len(args)}"
+            )
+        input_args = args[:len(self._input_param_names)]
+        forwarded_outputs = args[len(self._input_param_names):]
+
         # Map incoming args by placeholder name (preserve contiguity)
         arg_map: Dict[str, torch.Tensor] = {
             name: (arg if arg.is_contiguous() else arg.contiguous())
-            for name, arg in zip(self._input_param_names, args)
+            for name, arg in zip(self._input_param_names, input_args)
         }
         device = next(iter(arg_map.values())).device
 
@@ -187,7 +227,12 @@ class _DynamicCudaWrapper(nn.Module):
                 self.register_buffer("row_end_offsets", ro, persistent=False)
         else:
             # map only, this is fake ro input
-            ro = torch.tensor([42], dtype=torch.int32, device=device)
+            ro = self.fake_row_end_offsets
+            if ro.device != device:
+                ro = ro.to(device, non_blocking=True)
+                self.register_buffer(
+                    "fake_row_end_offsets", ro, persistent=False
+                )
 
         gi_list: List[torch.Tensor] = []
         for buf_name in self._selector_buf_names:
@@ -223,7 +268,20 @@ class _DynamicCudaWrapper(nn.Module):
                     else:
                         return int(val.shape[0])
 
-        num_cols = _infer_cols_from_inputs(self._non_gather_value_inputs, arg_map)
+        num_cols = _infer_cols_from_inputs(
+            self._non_gather_value_inputs, arg_map
+        )
+        if num_cols is None:
+            # A compiler-inserted arange Selector can leave a pure
+            # select-reduce group with no non-gather value placeholders.  In
+            # that case the gathered tensor supplies the logical column
+            # extent.  Passing None reaches pybind as an invalid int64_t.
+            num_cols = _infer_cols_from_inputs(
+                self._gather_value_inputs, arg_map
+            )
+        if num_cols is None:
+            # Scalar-only map groups have one logical item.
+            num_cols = 1
         if self.row_end_offsets is not None:
             num_rows = int(ro.numel() - 1)
         else:
@@ -242,7 +300,9 @@ class _DynamicCudaWrapper(nn.Module):
             call_args.append(gi)
         # 4) CSR and sizes
         call_args.extend([ro, num_rows, num_cols])
-        # 5) temp storage tensor (uint8) only for CUDA path; CPU bindings don't take it
+        # 5) caller-owned full-overwrite output destinations
+        call_args.extend(forwarded_outputs)
+        # 6) temp storage tensor (uint8) only for CUDA path; CPU bindings don't take it
         if device.type == "cuda":
             ts = self.temp_storage
             if ts is None:
@@ -273,6 +333,7 @@ def dynamic_replace_submodule(
     jit_graph: torch.fx.Graph,
     ext,
     submodule_name,
+    forwarded_output_count: int = 0,
 ) -> bool:
     """Replace a fused FX submodule with a dynamic CUDA wrapper.
 
@@ -320,6 +381,7 @@ def dynamic_replace_submodule(
             gather_value_inputs=gather_value_inputs,
             selector_idx_tensors=selector_idx_tensors,
             row_end_offsets=row_end_offsets,
+            forwarded_output_count=forwarded_output_count,
         )
 
         # Replace the submodule on the owning module using the qualified target path
@@ -329,4 +391,3 @@ def dynamic_replace_submodule(
         return True
 
     return False
-
