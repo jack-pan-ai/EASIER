@@ -24,6 +24,7 @@ from types import ModuleType
 from torch.fx.node import Node
 from easier.core.runtime.metadata import (
     ViewSrc,
+    collect_meta,
     get_node_view_src,
     set_node_view_src,
 )
@@ -75,6 +76,28 @@ def _same_tensor_source(lhs: Node, rhs: Node) -> bool:
         and rhs.op == FX.GET_ATTR
         and lhs.target == rhs.target
     )
+
+
+def _tensor_sources_may_alias(lhs: Node, rhs: Node) -> bool:
+    """Use runtime allocator metadata to reject output-forwarding aliases."""
+    try:
+        lhs_sources = set(collect_meta(
+            get_node_view_src(lhs), leaf_type=ViewSrc
+        ))
+        rhs_sources = set(collect_meta(
+            get_node_view_src(rhs), leaf_type=ViewSrc
+        ))
+    except KeyError:
+        # Small graph-only tests may not run metadata propagation.  Retain the
+        # original syntactic fallback there; production code has ViewSrcs.
+        return _same_tensor_source(lhs, rhs)
+
+    # Tensor-valued fused inputs and destinations must have an allocator
+    # source.  If metadata is incomplete, preserve the copy instead of trying
+    # to prove non-aliasing from node names.
+    if not lhs_sources or not rhs_sources:
+        return True
+    return not lhs_sources.isdisjoint(rhs_sources)
 
 
 def _find_forwarded_reducer_outputs(
@@ -134,7 +157,7 @@ def _find_forwarded_reducer_outputs(
         if not isinstance(destination, Node):
             continue
         if any(
-            _same_tensor_source(destination, input_node)
+            _tensor_sources_may_alias(destination, input_node)
             for input_node in call_inputs
         ):
             continue
@@ -155,6 +178,12 @@ def _find_forwarded_reducer_outputs(
     ]
     if len(set(destinations)) != len(destinations):
         return []
+    for i, lhs in enumerate(candidates):
+        if any(
+            _tensor_sources_may_alias(lhs.destination, rhs.destination)
+            for rhs in candidates[i + 1:]
+        ):
+            return []
 
     graph_nodes = list(graph.nodes)
     node_position = {node: idx for idx, node in enumerate(graph_nodes)}
@@ -516,8 +545,9 @@ def _snapshot_generated_source_cpu(suffix: str) -> Tuple[str, str, str]:
     tmp_dir = tempfile.mkdtemp(prefix=f"easier_src_cpu_{suffix}_")
     dst_src = os.path.join(tmp_dir, f"merged_binding_cpu_{suffix}.cpp")
     shutil.copyfile(src, dst_src)
+    dst_hdr = os.path.join(tmp_dir, "merged_spmv.h")
     if os.path.exists(gen_hdr):
-        shutil.copyfile(gen_hdr, os.path.join(tmp_dir, "merged_spmv.h"))
+        shutil.copyfile(gen_hdr, dst_hdr)
     dst_inc = os.path.join(tmp_dir, "include")
     # CPU generated code includes only the generated ``merged_spmv.h`` and
     # its sibling ``data_struct_shared.cuh``.  Do not snapshot the CUDA
@@ -534,10 +564,16 @@ def _snapshot_generated_source_cpu(suffix: str) -> Tuple[str, str, str]:
         with open(dst_src, "rb") as f:
             src_bytes = f.read()
         src_hash = hashlib.sha1(src_bytes).hexdigest()[:12]
+        with open(dst_hdr, "rb") as f:
+            hdr_bytes = f.read()
+        hdr_hash = hashlib.sha1(hdr_bytes).hexdigest()[:12]
     except Exception:
         src_hash = "nohash"
+        hdr_hash = "nohash"
     dir_hash = _hash_directory_tree(dst_inc)
-    combined_hash = hashlib.sha1(("cpu:" + src_hash + dir_hash).encode()).hexdigest()[:12]
+    combined_hash = hashlib.sha1(
+        ("cpu:" + src_hash + hdr_hash + dir_hash).encode()
+    ).hexdigest()[:12]
     return dst_src, dst_inc, combined_hash
 
 

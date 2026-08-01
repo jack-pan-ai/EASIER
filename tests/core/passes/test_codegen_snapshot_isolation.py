@@ -46,3 +46,21 @@ def test_cpu_snapshot_excludes_mutable_cuda_include_tree(tmp_path):
         "data_struct_shared.cuh"
     ]
     assert second_hash == first_hash
+
+    # The generated merged-SPMV header is compiled through the binding source
+    # and must therefore participate in the verified cache key.  Header-only
+    # code-generation changes must never reuse a stale extension binary.
+    (project / "merged_spmv.h").write_text("// generated cpu header changed\n")
+    third_snapshot = tmp_path / "snapshot-third"
+    third_snapshot.mkdir()
+    with (
+        mock.patch.object(codegen, "_repo_root", return_value=str(project)),
+        mock.patch.object(
+            codegen.tempfile, "mkdtemp", return_value=str(third_snapshot)
+        ),
+    ):
+        _, _, third_hash = codegen._snapshot_generated_source_cpu("region")
+    assert (third_snapshot / "merged_spmv.h").read_text() == (
+        "// generated cpu header changed\n"
+    )
+    assert third_hash != first_hash

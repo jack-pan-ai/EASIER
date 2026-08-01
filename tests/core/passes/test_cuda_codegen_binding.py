@@ -117,6 +117,8 @@ def _make_outer_reducer_overwrite(index=slice(None), destination_is_input=False)
     outer_graph = fx.Graph()
     input_x = outer_graph.get_attr("input_x")
     destination = outer_graph.get_attr("rhs")
+    set_node_view_src(input_x, ViewSrc(input_x, None))
+    set_node_view_src(destination, ViewSrc(destination, None))
     call_args = (
         (input_x, destination)
         if destination_is_input
@@ -164,6 +166,60 @@ def test_reducer_output_forwarding_rejects_partial_or_input_alias():
     )
     assert not codegen._find_forwarded_reducer_outputs(
         fused, graph, fused_call
+    )
+
+
+def test_reducer_output_forwarding_rejects_shared_allocator_alias():
+    fused, graph, fused_call, destination = \
+        _make_outer_reducer_overwrite()
+    input_x = fused_call.args[0]
+    assert isinstance(input_x, fx.Node)
+    shared_allocator = ViewSrc(input_x, None)
+    set_node_view_src(input_x, shared_allocator)
+    set_node_view_src(destination, shared_allocator)
+
+    assert not codegen._find_forwarded_reducer_outputs(
+        fused, graph, fused_call
+    )
+
+
+def test_reducer_output_forwarding_rejects_aliased_destinations():
+    reducer_root = torch.nn.Module()
+    reducer_root.reducer_a = esr.Reducer(
+        torch.tensor([0, 1], dtype=torch.int64), n=2
+    )
+    reducer_root.reducer_b = esr.Reducer(
+        torch.tensor([0, 1], dtype=torch.int64), n=2
+    )
+    inner_graph = fx.Graph()
+    inner_input = inner_graph.placeholder("input_x")
+    inner_a = inner_graph.call_module("reducer_a", args=(inner_input,))
+    inner_b = inner_graph.call_module("reducer_b", args=(inner_input,))
+    inner_graph.output([inner_a, inner_b])
+    fused = fx.GraphModule(reducer_root, inner_graph)
+
+    outer_graph = fx.Graph()
+    input_x = outer_graph.get_attr("input_x")
+    destination_a = outer_graph.get_attr("rhs_a")
+    destination_b = outer_graph.get_attr("rhs_b")
+    fused_call = outer_graph.call_module("_fused", args=(input_x,))
+    for index, destination in enumerate((destination_a, destination_b)):
+        result = outer_graph.call_function(
+            operator.getitem, args=(fused_call, index)
+        )
+        outer_graph.call_function(
+            operator.setitem,
+            args=(destination, slice(None), result),
+        )
+    outer_graph.output(None)
+
+    set_node_view_src(input_x, ViewSrc(input_x, None))
+    shared_allocator = ViewSrc(destination_a, None)
+    set_node_view_src(destination_a, shared_allocator)
+    set_node_view_src(destination_b, shared_allocator)
+
+    assert not codegen._find_forwarded_reducer_outputs(
+        fused, outer_graph, fused_call
     )
 
     fused, graph, fused_call, _ = _make_outer_reducer_overwrite(
